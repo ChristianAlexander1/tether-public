@@ -1,0 +1,5 @@
+[
+  { "name": "rg", "kind": "native", "entry": "rgCmd", "framework": "TermXCore" },
+  { "name": "jq", "kind": "native", "entry": "jqCmd", "framework": "TermXCore" },
+  { "name": "fd", "kind": "native", "entry": "fdCmd", "framework": "TermXCore" }
+]

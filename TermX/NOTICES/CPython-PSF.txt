@@ -1,0 +1,4 @@
+Python Software Foundation License (PSF)
+See: https://docs.python.org/3/license.html
+
+CPython 3.14 embedded via BeeWare Python-Apple-support (MIT build scripts).

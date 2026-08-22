@@ -1,0 +1,10 @@
+{
+  "commands": [
+    {
+      "name": "linux",
+      "kind": "linux",
+      "entry": "BlinkLinuxService",
+      "framework": "TermXLinux"
+    }
+  ]
+}

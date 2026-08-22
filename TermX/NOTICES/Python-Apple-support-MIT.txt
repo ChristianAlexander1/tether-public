@@ -1,0 +1,5 @@
+MIT License
+
+Copyright (c) BeeWare Project
+
+See: https://github.com/beeware/Python-Apple-support

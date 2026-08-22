@@ -1,0 +1,1 @@
+TermX only bundles dependencies approved by the project policy: MIT, BSD, ISC, Apache-2.0, PSF, zlib, SIL-OFL, and compatible public-domain licenses. Third-party source notices must be copied here at the time each upstream framework is added. The Anthropic Claude Code npm package and Alpine packages are user-installed and are not redistributed by TermX.

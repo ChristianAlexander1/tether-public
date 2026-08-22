@@ -1,0 +1,212 @@
+import Foundation
+import TermXBlinkBridge
+
+protocol LinuxRuntime: AnyObject {
+    func prepare(rootfs: URL, mapper: LinuxPathMapper) throws
+    func run(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool, shouldInterrupt: @escaping () -> Bool) async -> Int32
+    func interrupt()
+}
+
+enum LinuxRuntimeFactory {
+    static func make(rootfs: URL, mapper: LinuxPathMapper) -> LinuxRuntime {
+        if ProcessInfo.processInfo.environment["TERMX_BLINK_EMBED"] == "1", BlinkEmbed.isAvailable {
+            return EmbeddedBlinkRuntime(mapper: mapper)
+        }
+        #if os(macOS)
+        if FileManager.default.isExecutableFile(atPath: BlinkPaths.hostBinary) {
+            return HostBlinkRuntime(rootfs: rootfs, mapper: mapper)
+        }
+        #endif
+        return EmbeddedBlinkRuntime(mapper: mapper)
+    }
+}
+
+enum BlinkPaths {
+    static var hostBinary: String {
+        if let override = ProcessInfo.processInfo.environment["TERMX_BLINK_BINARY"] {
+            return override
+        }
+        let candidates = [
+            ProcessInfo.processInfo.environment["TERMX_BLINK_BINARY"],
+            "/Users/dev/Projects/terminal/TermX/Frameworks/.build/blink-src/o/rel/blink/blink",
+            "/Users/dev/Projects/terminal/TermX/Frameworks/.build/blink/blink-src/o/rel/blink/blink",
+            "/usr/local/bin/blink",
+            "/opt/homebrew/bin/blink",
+        ].compactMap { $0 }
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) } ?? candidates[0]
+    }
+
+    static var xcframeworkRoot: String {
+        ProcessInfo.processInfo.environment["TERMX_BLINK_XCFRAMEWORK"]
+            ?? "/Users/dev/Projects/terminal/TermX/Frameworks/Blink.xcframework"
+    }
+}
+
+enum BlinkEmbed {
+    static var isAvailable: Bool {
+        termx_blink_is_available() != 0
+    }
+}
+
+final class EmbeddedBlinkRuntime: LinuxRuntime {
+    private let mapper: LinuxPathMapper
+    private var rootfsPath: String = ""
+    private var prepared = false
+
+    init(mapper: LinuxPathMapper) {
+        self.mapper = mapper
+    }
+
+    func prepare(rootfs: URL, mapper: LinuxPathMapper) throws {
+        rootfsPath = rootfs.path
+        let rc = termx_blink_init(rootfsPath)
+        guard rc == 0 else { throw LinuxGuestError.bootstrapFailed("termx_blink_init: \(rc)") }
+
+        try FileManager.default.createDirectory(at: mapper.workspacesHostRoot, withIntermediateDirectories: true)
+        let mountWS = termx_blink_mount(mapper.workspacesHostRoot.path, mapper.guestWorkspacesPath)
+        guard mountWS == 0 else {
+            throw LinuxGuestError.mountFailed("/workspaces (\(mountWS))")
+        }
+
+        let mountHome = termx_blink_mount(mapper.homeHostRoot.path, mapper.guestHomePath)
+        guard mountHome == 0 else {
+            throw LinuxGuestError.mountFailed("/root (\(mountHome))")
+        }
+        prepared = true
+    }
+
+    func run(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool, shouldInterrupt: @escaping () -> Bool) async -> Int32 {
+        guard prepared, let prog = argv.first else { return 127 }
+
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var env = LinuxEnvironment.guestEnviron(cwd: cwd, interactive: interactive)
+                let envp = LinuxEnvironment.cEnvp(&env)
+                let argp = LinuxEnvironment.cArgv(argv)
+
+                let code = termx_blink_run(prog, argp, envp, stdinFD, stdoutFD, stderrFD)
+                LinuxEnvironment.freeCStrings(argp)
+                LinuxEnvironment.freeCStrings(envp)
+                continuation.resume(returning: code >= 0 ? code : 127)
+            }
+        }
+    }
+
+    func interrupt() {
+        termx_blink_interrupt()
+    }
+}
+
+#if os(macOS)
+final class HostBlinkRuntime: LinuxRuntime {
+    private let rootfs: URL
+    private let mapper: LinuxPathMapper
+    private var process: Process?
+
+    init(rootfs: URL, mapper: LinuxPathMapper) {
+        self.rootfs = rootfs
+        self.mapper = mapper
+    }
+
+    func prepare(rootfs: URL, mapper: LinuxPathMapper) throws {
+        guard FileManager.default.isExecutableFile(atPath: BlinkPaths.hostBinary) else {
+            throw LinuxGuestError.emulatorBinaryMissing
+        }
+        _ = rootfs
+        _ = mapper
+    }
+
+    func run(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool, shouldInterrupt: @escaping () -> Bool) async -> Int32 {
+        guard FileManager.default.isExecutableFile(atPath: BlinkPaths.hostBinary) else { return 127 }
+        guard let guestProg = argv.first else { return 127 }
+
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: 127)
+                    return
+                }
+
+                let blink = Process()
+                blink.executableURL = URL(fileURLWithPath: BlinkPaths.hostBinary)
+                blink.arguments = ["-jm", "-C", self.rootfs.path, guestProg] + Array(argv.dropFirst())
+                blink.currentDirectoryURL = URL(fileURLWithPath: cwd)
+
+                var env = ProcessInfo.processInfo.environment
+                env["TERM"] = env["TERM"] ?? "xterm-256color"
+                blink.environment = env
+
+                let outPipe = Pipe()
+                let errPipe = Pipe()
+                blink.standardOutput = outPipe
+                blink.standardError = errPipe
+
+                self.process = blink
+                do {
+                    try blink.run()
+                    while blink.isRunning {
+                        if shouldInterrupt() {
+                            blink.interrupt()
+                            break
+                        }
+                        Thread.sleep(forTimeInterval: 0.05)
+                    }
+                    let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+                    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                    if stdoutFD >= 0, !outData.isEmpty {
+                        outData.withUnsafeBytes { ptr in
+                            write(stdoutFD, ptr.baseAddress!, outData.count)
+                        }
+                    }
+                    if stderrFD >= 0, !errData.isEmpty {
+                        errData.withUnsafeBytes { ptr in
+                            write(stderrFD, ptr.baseAddress!, errData.count)
+                        }
+                    }
+                    continuation.resume(returning: Int32(blink.terminationStatus))
+                } catch {
+                    continuation.resume(returning: 127)
+                }
+                self.process = nil
+            }
+        }
+    }
+
+    func interrupt() {
+        process?.interrupt()
+    }
+}
+#endif
+
+enum LinuxEnvironment {
+    static func guestEnviron(cwd: String, interactive: Bool) -> [String: String] {
+        var env: [String: String] = [
+            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "HOME": "/root",
+            "TERM": interactive ? "xterm-256color" : "dumb",
+            "LANG": "en_US.UTF-8",
+            "PWD": cwd.hasPrefix("/") ? cwd : "/",
+        ]
+        return env
+    }
+
+    static func cArgv(_ argv: [String]) -> [UnsafeMutablePointer<CChar>?] {
+        var pointers: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) }
+        pointers.append(nil)
+        return pointers
+    }
+
+    static func cEnvp(_ env: inout [String: String]) -> [UnsafeMutablePointer<CChar>?] {
+        var pointers: [UnsafeMutablePointer<CChar>?] = env.map { key, value in
+            strdup("\(key)=\(value)")
+        }
+        pointers.append(nil)
+        return pointers
+    }
+
+    static func freeCStrings(_ list: [UnsafeMutablePointer<CChar>?]) {
+        for ptr in list where ptr != nil {
+            free(ptr)
+        }
+    }
+}

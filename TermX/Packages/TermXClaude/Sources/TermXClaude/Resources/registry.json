@@ -1,0 +1,10 @@
+{
+  "commands": [
+    {
+      "name": "claude",
+      "kind": "node",
+      "entry": "ClaudeCodeService",
+      "framework": "TermXClaude"
+    }
+  ]
+}

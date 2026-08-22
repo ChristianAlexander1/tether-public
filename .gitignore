@@ -1,0 +1,71 @@
+# macOS / general
+.DS_Store
+.AppleDouble
+.LSOverride
+*~
+*.swp
+*.tmp
+*.log
+*.profraw
+
+# Editors / IDE
+.cursor/
+.vscode/
+.idea/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.xcscmblueprint
+
+# Xcode / SwiftPM build products
+DerivedData/
+**/build/
+**/.build/
+**/.swiftpm/
+**/Package.resolved
+*.o
+*.a
+TermX/Frameworks/.build/
+
+# Generated / local Xcode noise (keep project.yml + TermX.xcodeproj)
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# Large native binaries — rebuild with Frameworks/*.sh (see README)
+**/*.xcframework/
+
+# Blink header tree should not include upstream .c sources (headers only)
+TermX/Frameworks/include/blink/*.c
+
+# Node / JS
+**/node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Test / coverage / profiling
+*.xcresult/
+coverage/
+*.profdata
+default.profraw
+
+# Simulator / local env
+.env
+.env.*
+!.env.example
+*.p12
+*.mobileprovision
+Secrets/
+credentials.json

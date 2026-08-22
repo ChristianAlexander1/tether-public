@@ -1,0 +1,16 @@
+{
+  "commands": [
+    {
+      "name": "node",
+      "kind": "node",
+      "entry": "EmbeddedNodeService",
+      "framework": "TermXNode"
+    },
+    {
+      "name": "npm",
+      "kind": "node",
+      "entry": "EmbeddedNodeService",
+      "framework": "TermXNode"
+    }
+  ]
+}

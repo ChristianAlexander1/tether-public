@@ -1,0 +1,6 @@
+[
+  {"name":"python3","kind":"native","entry":"termx_runtime.CommandEngine","framework":"TermXPython"},
+  {"name":"node","kind":"native","entry":"node","framework":"TermXNode"},
+  {"name":"claude","kind":"node","entry":"@anthropic-ai/claude-code","framework":"TermXClaude"},
+  {"name":"linux","kind":"linux","entry":"sh","framework":"TermXLinux"}
+]

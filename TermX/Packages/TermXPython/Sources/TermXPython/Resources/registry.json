@@ -1,0 +1,18 @@
+{
+  "component": "TermXPython",
+  "version": 1,
+  "commands": [
+    {
+      "name": "python3",
+      "kind": "native",
+      "entry": "termx_python_run",
+      "framework": "TermXPython"
+    },
+    {
+      "name": "pip",
+      "kind": "native",
+      "entry": "termx_python_run",
+      "framework": "TermXPython"
+    }
+  ]
+}

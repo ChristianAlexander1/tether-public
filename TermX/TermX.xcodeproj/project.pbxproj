@@ -1,0 +1,612 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		081171B5D610E6A483445CB0 /* JetBrainsMono-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = 2833FE6B613B91269014F072 /* JetBrainsMono-OFL.txt */; };
+		1A8DF69AEBD4623AA1FA3714 /* TermXLinux in Frameworks */ = {isa = PBXBuildFile; productRef = A51FD991C3C10353ADD2C5BB /* TermXLinux */; };
+		230C9BD90E90C5F723AC9D4F /* TermXPython in Frameworks */ = {isa = PBXBuildFile; productRef = A2543F40DAB01E7C036356F1 /* TermXPython */; };
+		25D8F2342F390F7D635770E7 /* TermXIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D66F48FF96E30FE1010BB11 /* TermXIntegration.swift */; };
+		4348737FE5E2435C506D1AC4 /* TermXCore in Frameworks */ = {isa = PBXBuildFile; productRef = CB9E465F7044B8E84A735117 /* TermXCore */; };
+		4862849D0ECEC1892AC767D9 /* nodejs-mobile-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6F97B12386A1BE15A7E231DA /* nodejs-mobile-MIT.txt */; };
+		4E9C134C71377B4BCA7CFB5A /* FolderPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E75BC0E1D45B4C3FD5F2082D /* FolderPickerTests.swift */; };
+		5D7BC23653062274A2DBACB6 /* SwiftTerm-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = A3941B295347FE748DEC87D0 /* SwiftTerm-MIT.txt */; };
+		783757237627338CD02A8FA0 /* CPython-PSF.txt in Resources */ = {isa = PBXBuildFile; fileRef = B4B28FFBABD426E5BF4C0A3B /* CPython-PSF.txt */; };
+		8951112EDAEEA2B76306958A /* TermXClaude in Frameworks */ = {isa = PBXBuildFile; productRef = E27DA7E96F0EB584494B169C /* TermXClaude */; };
+		92B25A49FBF5F4F73729B3EA /* TermXApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 719D354C819D7B1EFDF91890 /* TermXApp.swift */; };
+		A07B571C04F6CCD8A7287EB8 /* Blink-ISC.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5E9E3A2FF4D61FD5198402C4 /* Blink-ISC.txt */; };
+		D943A82A117C87278F519562 /* TerminalTypingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A995E12F545D9F298B9CAC4B /* TerminalTypingTests.swift */; };
+		E074B021D106AF2EAC3313C4 /* TermXFiles in Frameworks */ = {isa = PBXBuildFile; productRef = 5B65D9FA34A694D714EDCE09 /* TermXFiles */; };
+		EAD2FB3C7AE001578CF7EB69 /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FBA686458DDB3F626D78B2 /* LicensesView.swift */; };
+		F60459EC485EA2C180C8023D /* TermXUI in Frameworks */ = {isa = PBXBuildFile; productRef = A94743A67D7C84B299F27B94 /* TermXUI */; };
+		F7EA4A564AE0EE01DFAB7AE9 /* Python-Apple-support-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = BBB6059064A161C31DBDC614 /* Python-Apple-support-MIT.txt */; };
+		FBA6A604818B9928A79A0031 /* TermXNode in Frameworks */ = {isa = PBXBuildFile; productRef = 948DE778D207E9147500CA20 /* TermXNode */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		617879057E7BF90F649C8128 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 51523A427B4293E4D7FAD599 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FF2CB3E86B06C780C83E0643;
+			remoteInfo = TermX;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		07FBA686458DDB3F626D78B2 /* LicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
+		0B92040037DCB68324178231 /* TermXUI */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXUI; path = Packages/TermXUI; sourceTree = SOURCE_ROOT; };
+		16363302B5645C9601ACD1D0 /* TermXLinux */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXLinux; path = Packages/TermXLinux; sourceTree = SOURCE_ROOT; };
+		2833FE6B613B91269014F072 /* JetBrainsMono-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "JetBrainsMono-OFL.txt"; sourceTree = "<group>"; };
+		32041601573BFC59EC76D5C4 /* TermXClaude */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXClaude; path = Packages/TermXClaude; sourceTree = SOURCE_ROOT; };
+		3D148B0C51EF897BFAE1849C /* TermX.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TermX.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3D66F48FF96E30FE1010BB11 /* TermXIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TermXIntegration.swift; sourceTree = "<group>"; };
+		5E9E3A2FF4D61FD5198402C4 /* Blink-ISC.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Blink-ISC.txt"; sourceTree = "<group>"; };
+		6F97B12386A1BE15A7E231DA /* nodejs-mobile-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "nodejs-mobile-MIT.txt"; sourceTree = "<group>"; };
+		719D354C819D7B1EFDF91890 /* TermXApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TermXApp.swift; sourceTree = "<group>"; };
+		722DBEEA0432698F278F76D6 /* TermXNode */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXNode; path = Packages/TermXNode; sourceTree = SOURCE_ROOT; };
+		A3941B295347FE748DEC87D0 /* SwiftTerm-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "SwiftTerm-MIT.txt"; sourceTree = "<group>"; };
+		A995E12F545D9F298B9CAC4B /* TerminalTypingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTypingTests.swift; sourceTree = "<group>"; };
+		ADB78AA0A19EFF9ED2550867 /* TermXCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXCore; path = Packages/TermXCore; sourceTree = SOURCE_ROOT; };
+		B44026B610DBD2BF147F8A10 /* TermXPython */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXPython; path = Packages/TermXPython; sourceTree = SOURCE_ROOT; };
+		B4B28FFBABD426E5BF4C0A3B /* CPython-PSF.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "CPython-PSF.txt"; sourceTree = "<group>"; };
+		BBB6059064A161C31DBDC614 /* Python-Apple-support-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Python-Apple-support-MIT.txt"; sourceTree = "<group>"; };
+		E75BC0E1D45B4C3FD5F2082D /* FolderPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPickerTests.swift; sourceTree = "<group>"; };
+		E9E0250808B1040CA9247931 /* TermXUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TermXUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FF4FDB1A903B813AB57DDFBC /* TermXFiles */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXFiles; path = Packages/TermXFiles; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2BFB784BF4B239BDF01C679D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F60459EC485EA2C180C8023D /* TermXUI in Frameworks */,
+				4348737FE5E2435C506D1AC4 /* TermXCore in Frameworks */,
+				E074B021D106AF2EAC3313C4 /* TermXFiles in Frameworks */,
+				230C9BD90E90C5F723AC9D4F /* TermXPython in Frameworks */,
+				FBA6A604818B9928A79A0031 /* TermXNode in Frameworks */,
+				8951112EDAEEA2B76306958A /* TermXClaude in Frameworks */,
+				1A8DF69AEBD4623AA1FA3714 /* TermXLinux in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		212CAF3882ACF3BE2DB2A8E6 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				32041601573BFC59EC76D5C4 /* TermXClaude */,
+				ADB78AA0A19EFF9ED2550867 /* TermXCore */,
+				FF4FDB1A903B813AB57DDFBC /* TermXFiles */,
+				16363302B5645C9601ACD1D0 /* TermXLinux */,
+				722DBEEA0432698F278F76D6 /* TermXNode */,
+				B44026B610DBD2BF147F8A10 /* TermXPython */,
+				0B92040037DCB68324178231 /* TermXUI */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		4CDA8083212D3AB55B537596 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				3D148B0C51EF897BFAE1849C /* TermX.app */,
+				E9E0250808B1040CA9247931 /* TermXUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		58594E1624BB861119F80F5F /* IntegrationSource */ = {
+			isa = PBXGroup;
+			children = (
+				3D66F48FF96E30FE1010BB11 /* TermXIntegration.swift */,
+			);
+			name = IntegrationSource;
+			path = App/IntegrationSource;
+			sourceTree = "<group>";
+		};
+		72A4893CF75DA1A695786976 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				07FBA686458DDB3F626D78B2 /* LicensesView.swift */,
+				719D354C819D7B1EFDF91890 /* TermXApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		9147C713E840E56F42249940 /* NOTICES */ = {
+			isa = PBXGroup;
+			children = (
+				5E9E3A2FF4D61FD5198402C4 /* Blink-ISC.txt */,
+				B4B28FFBABD426E5BF4C0A3B /* CPython-PSF.txt */,
+				2833FE6B613B91269014F072 /* JetBrainsMono-OFL.txt */,
+				6F97B12386A1BE15A7E231DA /* nodejs-mobile-MIT.txt */,
+				BBB6059064A161C31DBDC614 /* Python-Apple-support-MIT.txt */,
+				A3941B295347FE748DEC87D0 /* SwiftTerm-MIT.txt */,
+			);
+			path = NOTICES;
+			sourceTree = "<group>";
+		};
+		960BB7361922CCA5475FA593 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				9147C713E840E56F42249940 /* NOTICES */,
+			);
+			name = Resources;
+			path = App/Resources;
+			sourceTree = "<group>";
+		};
+		AEFAF0ACDE42D4D69457615A = {
+			isa = PBXGroup;
+			children = (
+				72A4893CF75DA1A695786976 /* App */,
+				58594E1624BB861119F80F5F /* IntegrationSource */,
+				212CAF3882ACF3BE2DB2A8E6 /* Packages */,
+				960BB7361922CCA5475FA593 /* Resources */,
+				AF1C07CB9714E5DFFDAC8300 /* UITests */,
+				4CDA8083212D3AB55B537596 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AF1C07CB9714E5DFFDAC8300 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				E75BC0E1D45B4C3FD5F2082D /* FolderPickerTests.swift */,
+				A995E12F545D9F298B9CAC4B /* TerminalTypingTests.swift */,
+			);
+			name = UITests;
+			path = App/UITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		7C29C0D05B74EE6CB1A5C3DD /* TermXUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5D800FD163F76E78272124D8 /* Build configuration list for PBXNativeTarget "TermXUITests" */;
+			buildPhases = (
+				B77A2597A1F912EE9EDBDB8C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2FE6A9E37D5DC68E5A63F330 /* PBXTargetDependency */,
+			);
+			name = TermXUITests;
+			packageProductDependencies = (
+			);
+			productName = TermXUITests;
+			productReference = E9E0250808B1040CA9247931 /* TermXUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		FF2CB3E86B06C780C83E0643 /* TermX */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5ED60823390BE244AD8576DF /* Build configuration list for PBXNativeTarget "TermX" */;
+			buildPhases = (
+				04FC08A9B8B28F26E4AD8436 /* Sources */,
+				3D4635EABCB942AB1B88E07A /* Install Python Stdlib */,
+				00FEE542546ED7F3945319AB /* Resources */,
+				2BFB784BF4B239BDF01C679D /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TermX;
+			packageProductDependencies = (
+				A94743A67D7C84B299F27B94 /* TermXUI */,
+				CB9E465F7044B8E84A735117 /* TermXCore */,
+				5B65D9FA34A694D714EDCE09 /* TermXFiles */,
+				A2543F40DAB01E7C036356F1 /* TermXPython */,
+				948DE778D207E9147500CA20 /* TermXNode */,
+				E27DA7E96F0EB584494B169C /* TermXClaude */,
+				A51FD991C3C10353ADD2C5BB /* TermXLinux */,
+			);
+			productName = TermX;
+			productReference = 3D148B0C51EF897BFAE1849C /* TermX.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		51523A427B4293E4D7FAD599 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					7C29C0D05B74EE6CB1A5C3DD = {
+						TestTargetID = FF2CB3E86B06C780C83E0643;
+					};
+				};
+			};
+			buildConfigurationList = 59220D7319DED6EB4E79686E /* Build configuration list for PBXProject "TermX" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = AEFAF0ACDE42D4D69457615A;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				3A4A8D415821D2137DB101A1 /* XCLocalSwiftPackageReference "Packages/TermXClaude" */,
+				3DC76A7C6F135B5072DFF285 /* XCLocalSwiftPackageReference "Packages/TermXCore" */,
+				331F83E11DCD24CE72AD7945 /* XCLocalSwiftPackageReference "Packages/TermXFiles" */,
+				2E5EFEA00F7D51191345A93D /* XCLocalSwiftPackageReference "Packages/TermXLinux" */,
+				8081CB165CEF9EB4E0DFB122 /* XCLocalSwiftPackageReference "Packages/TermXNode" */,
+				7B301BDD37A9C7FB115E6E2E /* XCLocalSwiftPackageReference "Packages/TermXPython" */,
+				B0CB9602725566239536B364 /* XCLocalSwiftPackageReference "Packages/TermXUI" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 4CDA8083212D3AB55B537596 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				FF2CB3E86B06C780C83E0643 /* TermX */,
+				7C29C0D05B74EE6CB1A5C3DD /* TermXUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		00FEE542546ED7F3945319AB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A07B571C04F6CCD8A7287EB8 /* Blink-ISC.txt in Resources */,
+				783757237627338CD02A8FA0 /* CPython-PSF.txt in Resources */,
+				081171B5D610E6A483445CB0 /* JetBrainsMono-OFL.txt in Resources */,
+				F7EA4A564AE0EE01DFAB7AE9 /* Python-Apple-support-MIT.txt in Resources */,
+				5D7BC23653062274A2DBACB6 /* SwiftTerm-MIT.txt in Resources */,
+				4862849D0ECEC1892AC767D9 /* nodejs-mobile-MIT.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		3D4635EABCB942AB1B88E07A /* Install Python Stdlib */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Install Python Stdlib";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n# BeeWare Python-Apple-support: copy stdlib + convert .so → signed frameworks.\nXCFRAMEWORK=\"Frameworks/TermXPython.xcframework\"\nif [ ! -d \"$PROJECT_DIR/$XCFRAMEWORK\" ]; then\n  XCFRAMEWORK=\"Packages/TermXPython/Vendor/TermXPython.xcframework\"\nfi\nif [ ! -d \"$PROJECT_DIR/$XCFRAMEWORK\" ]; then\n  echo \"error: TermXPython.xcframework not found for stdlib install\" >&2\n  exit 1\nfi\n# Skip on macOS Catalyst / unexpected platforms; iPhoneOS + Simulator only.\ncase \"${EFFECTIVE_PLATFORM_NAME:-}\" in\n  -iphoneos|-iphonesimulator) ;;\n  *)\n    echo \"note: skipping Python stdlib install for ${EFFECTIVE_PLATFORM_NAME:-unknown}\"\n    exit 0\n    ;;\nesac\nsource \"$PROJECT_DIR/$XCFRAMEWORK/build/utils.sh\"\n# Identity \"-\" is fine when CODE_SIGNING_ALLOWED=NO (Simulator debug builds).\nexport EXPANDED_CODE_SIGN_IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:--}\"\nexport EXPANDED_CODE_SIGN_IDENTITY_NAME=\"${EXPANDED_CODE_SIGN_IDENTITY_NAME:-Sign to Run Locally}\"\ninstall_python \"$XCFRAMEWORK\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		04FC08A9B8B28F26E4AD8436 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EAD2FB3C7AE001578CF7EB69 /* LicensesView.swift in Sources */,
+				92B25A49FBF5F4F73729B3EA /* TermXApp.swift in Sources */,
+				25D8F2342F390F7D635770E7 /* TermXIntegration.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B77A2597A1F912EE9EDBDB8C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4E9C134C71377B4BCA7CFB5A /* FolderPickerTests.swift in Sources */,
+				D943A82A117C87278F519562 /* TerminalTypingTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		2FE6A9E37D5DC68E5A63F330 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FF2CB3E86B06C780C83E0643 /* TermX */;
+			targetProxy = 617879057E7BF90F649C8128 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		5B428A1696885AD89A11F1EE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.termx.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		610DCF2048522A9B189E21E7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.termx.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		85C1732B445DA8C8F1037D8C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.termx.TermXUITests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = TermX;
+			};
+			name = Release;
+		};
+		967AAE69950F39601EEB86D5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		CA0F67F9AC913641194CEB76 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.termx.TermXUITests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = TermX;
+			};
+			name = Debug;
+		};
+		FCA98075439B5B186EA1A86F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		59220D7319DED6EB4E79686E /* Build configuration list for PBXProject "TermX" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FCA98075439B5B186EA1A86F /* Debug */,
+				967AAE69950F39601EEB86D5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5D800FD163F76E78272124D8 /* Build configuration list for PBXNativeTarget "TermXUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CA0F67F9AC913641194CEB76 /* Debug */,
+				85C1732B445DA8C8F1037D8C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5ED60823390BE244AD8576DF /* Build configuration list for PBXNativeTarget "TermX" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5B428A1696885AD89A11F1EE /* Debug */,
+				610DCF2048522A9B189E21E7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		2E5EFEA00F7D51191345A93D /* XCLocalSwiftPackageReference "Packages/TermXLinux" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXLinux;
+		};
+		331F83E11DCD24CE72AD7945 /* XCLocalSwiftPackageReference "Packages/TermXFiles" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXFiles;
+		};
+		3A4A8D415821D2137DB101A1 /* XCLocalSwiftPackageReference "Packages/TermXClaude" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXClaude;
+		};
+		3DC76A7C6F135B5072DFF285 /* XCLocalSwiftPackageReference "Packages/TermXCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXCore;
+		};
+		7B301BDD37A9C7FB115E6E2E /* XCLocalSwiftPackageReference "Packages/TermXPython" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXPython;
+		};
+		8081CB165CEF9EB4E0DFB122 /* XCLocalSwiftPackageReference "Packages/TermXNode" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXNode;
+		};
+		B0CB9602725566239536B364 /* XCLocalSwiftPackageReference "Packages/TermXUI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXUI;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5B65D9FA34A694D714EDCE09 /* TermXFiles */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXFiles;
+		};
+		948DE778D207E9147500CA20 /* TermXNode */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXNode;
+		};
+		A2543F40DAB01E7C036356F1 /* TermXPython */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXPython;
+		};
+		A51FD991C3C10353ADD2C5BB /* TermXLinux */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXLinux;
+		};
+		A94743A67D7C84B299F27B94 /* TermXUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXUI;
+		};
+		CB9E465F7044B8E84A735117 /* TermXCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXCore;
+		};
+		E27DA7E96F0EB584494B169C /* TermXClaude */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXClaude;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 51523A427B4293E4D7FAD599 /* Project object */;
+}
