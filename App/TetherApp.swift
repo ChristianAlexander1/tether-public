@@ -52,6 +52,11 @@ final class CoreEngineAdapter: TermXUI.TerminalEngine {
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    // A NavigationLink inside a Menu pushes outside the stack's normal flow and
+    // arrives without a back button, trapping the user. Menu items set these
+    // instead and navigationDestination does the push.
+    @State private var showStorage = false
+    @State private var showLicenses = false
     var body: some View {
         NavigationStack {
             if let workspace = model.selected {
@@ -67,10 +72,10 @@ struct RootView: View {
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Menu {
-                            NavigationLink { StorageView() } label: {
+                            Button { showStorage = true } label: {
                                 Label("Storage", systemImage: "internaldrive")
                             }
-                            NavigationLink { LicensesView() } label: {
+                            Button { showLicenses = true } label: {
                                 Label("Licenses", systemImage: "doc.text")
                             }
                         } label: { Image(systemName: "ellipsis.circle") }
@@ -79,6 +84,8 @@ struct RootView: View {
                         Button("Add Folder") { Task { await model.addWorkspace() } }
                     }
                 }
+                .navigationDestination(isPresented: $showStorage) { StorageView() }
+                .navigationDestination(isPresented: $showLicenses) { LicensesView() }
             }
         }
         .alert("Unable to open workspace", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "Unknown error") }
@@ -90,6 +97,9 @@ struct WorkspaceView: View {
     let workspace: Workspace
     @State private var session: TerminalSession?
     @State private var resolvedPath: String?
+    @State private var showFiles = false
+    @State private var showStorage = false
+    @State private var showLicenses = false
     var body: some View {
         Group {
             if let session { TerminalSessionView(session: session, theme: $model.theme) }
@@ -99,21 +109,28 @@ struct WorkspaceView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
-                    if let resolvedPath {
-                        NavigationLink {
-                            WorkspaceFilesView(rootPath: resolvedPath, title: workspace.name)
-                        } label: { Label("Files", systemImage: "folder") }
+                    if resolvedPath != nil {
+                        Button { showFiles = true } label: {
+                            Label("Files", systemImage: "folder")
+                        }
                     }
-                    NavigationLink { StorageView() } label: {
+                    Button { showStorage = true } label: {
                         Label("Storage", systemImage: "internaldrive")
                     }
-                    NavigationLink { LicensesView() } label: {
+                    Button { showLicenses = true } label: {
                         Label("Licenses", systemImage: "doc.text")
                     }
                 } label: { Image(systemName: "sidebar.leading") }
                 .accessibilityIdentifier("workspaceMenu")
             }
         }
+        .navigationDestination(isPresented: $showFiles) {
+            if let resolvedPath {
+                WorkspaceFilesView(rootPath: resolvedPath, title: workspace.name)
+            }
+        }
+        .navigationDestination(isPresented: $showStorage) { StorageView() }
+        .navigationDestination(isPresented: $showLicenses) { LicensesView() }
         .task {
             if session == nil {
                 let path: String?

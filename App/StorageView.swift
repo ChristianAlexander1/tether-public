@@ -5,6 +5,7 @@ import SwiftUI
 /// are never touched here.
 struct StorageView: View {
     @StateObject private var model = StorageModel()
+    @State private var pendingDeletion: StorageEntry?
 
     var body: some View {
         List {
@@ -21,7 +22,7 @@ struct StorageView: View {
 
             Section("Installed") {
                 ForEach(model.entries) { entry in
-                    StorageRow(entry: entry) { model.clear(entry) }
+                    StorageRow(entry: entry) { pendingDeletion = entry }
                 }
                 if model.entries.isEmpty && !model.isMeasuring {
                     Text("Nothing installed yet").foregroundStyle(.secondary)
@@ -48,13 +49,24 @@ struct StorageView: View {
         }
         .task { model.measure() }
         .refreshable { model.measure() }
+        .confirmationDialog(
+            pendingDeletion.map { "Delete \($0.name)?" } ?? "",
+            isPresented: Binding(get: { pendingDeletion != nil },
+                                 set: { if !$0 { pendingDeletion = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingDeletion
+        ) { entry in
+            Button("Delete", role: .destructive) { model.clear(entry) }
+            Button("Cancel", role: .cancel) {}
+        } message: { entry in
+            Text(entry.removalWarning)
+        }
     }
 }
 
 private struct StorageRow: View {
     let entry: StorageEntry
-    let onClear: () -> Void
-    @State private var confirming = false
+    let onRequestClear: () -> Void
 
     var body: some View {
         HStack {
@@ -65,23 +77,17 @@ private struct StorageRow: View {
             Spacer()
             Text(StorageModel.format(entry.bytes)).monospacedDigit().foregroundStyle(.secondary)
             if entry.isRemovable {
-                Button(role: .destructive) { confirming = true } label: {
+                Button(role: .destructive) { onRequestClear() } label: {
                     Image(systemName: "trash").foregroundStyle(.red)
                 }
                 .buttonStyle(.borderless)
             }
         }
-        .confirmationDialog("Delete \(entry.name)?", isPresented: $confirming, titleVisibility: .visible) {
-            Button("Delete", role: .destructive, action: onClear)
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(entry.removalWarning)
-        }
     }
 }
 
 struct StorageEntry: Identifiable {
-    let id = UUID()
+    var id: String { path }
     let name: String
     let detail: String
     let path: String
@@ -130,8 +136,13 @@ final class StorageModel: ObservableObject {
         ]
     }
 
+    private var remeasureQueued = false
+
     func measure() {
-        guard !isMeasuring else { return }
+        // A measure requested mid-flight (the refresh right after a delete) used to
+        // be dropped, leaving stale sizes on screen. Queue it instead.
+        guard !isMeasuring else { remeasureQueued = true; return }
+        remeasureQueued = false
         isMeasuring = true
         let list = candidates
         Task.detached(priority: .utility) {
@@ -150,20 +161,36 @@ final class StorageModel: ObservableObject {
                 self.entries = sorted
                 self.total = sum
                 self.isMeasuring = false
+                if self.remeasureQueued { self.measure() }
             }
         }
     }
 
     func clear(_ entry: StorageEntry) {
-        try? FileManager.default.removeItem(atPath: entry.path)
+        Self.remove(entry.path, preservingDirectory: entry.isCache)
         measure()
     }
 
     func clearAllCaches() {
         for entry in entries where entry.isCache {
-            try? FileManager.default.removeItem(atPath: entry.path)
+            Self.remove(entry.path, preservingDirectory: true)
         }
         measure()
+    }
+
+    /// Deletes `path`. Cache directories are emptied rather than removed: iOS
+    /// expects NSTemporaryDirectory() to keep existing, and deleting it makes
+    /// every later write into it fail.
+    nonisolated static func remove(_ path: String, preservingDirectory: Bool) {
+        let fm = FileManager.default
+        guard preservingDirectory else {
+            try? fm.removeItem(atPath: path)
+            return
+        }
+        guard let names = try? fm.contentsOfDirectory(atPath: path) else { return }
+        for name in names {
+            try? fm.removeItem(atPath: (path as NSString).appendingPathComponent(name))
+        }
     }
 
     /// Sums the allocated size of every file below `path`. Returns 0 when absent.

@@ -73,6 +73,16 @@ apply_ios_patches() {
     echo "==> Patching blink/syscall.c for iOS (clock_settime)"
     /usr/bin/sed -i '' 's/return clock_settime(sysclock, \&ht);/errno = EPERM; return -1; \/* TermX iOS: clock_settime unavailable *\//' "$f"
   fi
+  # SysUname strcpy()s version/release straight into utsname_linux's 65-byte
+  # fields. Long -D values overflow and abort the process under _FORTIFY_SOURCE.
+  # Bound both copies; uts is memset to 0 above, so truncation stays terminated.
+  if grep -q 'strcpy(uts.version,' "$f"; then
+    echo "==> Patching blink/syscall.c for iOS (bounded SysUname copies)"
+    /usr/bin/sed -i '' \
+      -e 's/strcpy(uts.release, \(.*\));/strncpy(uts.release, \1, sizeof(uts.release) - 1);/' \
+      -e 's/strcpy(uts.version, \(.*\));/strncpy(uts.version, \1, sizeof(uts.version) - 1);/' \
+      "$f"
+  fi
 }
 
 build_ios_slice() {
@@ -97,6 +107,21 @@ build_ios_slice() {
   cflags+=" -isysroot $sysroot -O2 -DNDEBUG -D_DARWIN_C_SOURCE"
   # iOS lacks fdatasync; map to fsync. clock_settime patched in apply_ios_patches.
   cflags+=" -Dfdatasync=fsync"
+  # Upstream's Makefile supplies these; build_ios_slice drives clang directly, so
+  # pass them here too. Without them syscall.c falls back to its *_UNKNOWN
+  # placeholders, and SysUname strcpy()s a 69-char string into uts.version[65] --
+  # a fortify overflow that SIGTRAPs on the guest's first uname(). Keep short.
+  local blink_commits blink_uname_v build_timestamp
+  blink_commits="$(git -C "$SRC" rev-list HEAD --count 2>/dev/null || echo 1)"
+  blink_uname_v="NOJIT"   # matches ./configure --disable-jit
+  build_timestamp="$(LC_ALL=C TZ=UTC date +"%a %b %e %T %Z %Y")"
+  # Kept in an array, not $cflags: the timestamp contains spaces and $cflags is
+  # deliberately word-split unquoted at the clang call.
+  local -a version_defines=(
+    "-DBLINK_COMMITS=\"${blink_commits}\""
+    "-DBLINK_UNAME_V=\"${blink_uname_v}\""
+    "-DBUILD_TIMESTAMP=\"${build_timestamp}\""
+  )
   # ios-shims/config.h overlays host flags (drops HAVE_SYS_GETENTROPY).
   cflags+=" -I$ROOT/ios-shims -I$SRC -I$BUILD/host -include config.h -iquote$SRC"
 
@@ -106,7 +131,7 @@ build_ios_slice() {
     local obj="$outdir/${base}.o"
     mkdir -p "$(dirname "$obj")"
     # shellcheck disable=SC2086
-    if ! "$cc" $cflags -c "$SRC/${base}.c" -o "$obj"; then
+    if ! "$cc" $cflags "${version_defines[@]}" -c "$SRC/${base}.c" -o "$obj"; then
       echo "error: failed compiling $base for $label" >&2
       return 1
     fi

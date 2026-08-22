@@ -2,27 +2,52 @@
 
 ## Run it
 
+Set `DEVICE` to whichever simulator you want; the rest of the block is identical
+for iPhone and iPad.
+
 ```bash
 cd ~/Projects/tether
+
+DEVICE="iPhone 17 Pro"          # iPhone
+# DEVICE="iPad Pro 11-inch (M5)"  # iPad
 
 # 1. (only after changing project.yml) regenerate the Xcode project
 xcodegen generate
 
 # 2. build
 xcodebuild -project Tether.xcodeproj -scheme Tether \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -destination "platform=iOS Simulator,name=$DEVICE" \
   -skipPackagePluginValidation -skipMacroValidation build
 
 # 3. install + launch on the Simulator
 open -a Simulator
+xcrun simctl boot "$DEVICE" 2>/dev/null || true
 APP=$(xcodebuild -project Tether.xcodeproj -scheme Tether \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -showBuildSettings 2>/dev/null \
+  -destination "platform=iOS Simulator,name=$DEVICE" -showBuildSettings 2>/dev/null \
   | awk '/ BUILT_PRODUCTS_DIR/{d=$3} /FULL_PRODUCT_NAME/{n=$3} END{print d"/"n}')
-xcrun simctl install "iPhone 17 Pro" "$APP"
-xcrun simctl launch "iPhone 17 Pro" com.tether.app
+xcrun simctl install "$DEVICE" "$APP"
+xcrun simctl launch "$DEVICE" com.tether.app
 ```
 
-Or just open `Tether.xcodeproj` in Xcode and press ⌘R.
+`xcrun simctl list devices available` shows the exact names to put in `DEVICE`.
+
+Or just open `Tether.xcodeproj` in Xcode and press ⌘R, choosing the device from the
+run-destination menu.
+
+### Extra icons on the Simulator home screen
+
+Running the UI tests installs a test-runner app that shows up as its own icon next to
+Tether. It is a build artifact, not part of the app, and it comes back every time the
+UI tests run. To clear them out:
+
+```bash
+DEVICE="iPhone 17 Pro"
+xcrun simctl boot "$DEVICE" 2>/dev/null || true
+xcrun simctl uninstall "$DEVICE" com.tether.TetherUITests.xctrunner   # current runner
+xcrun simctl uninstall "$DEVICE" com.termx.TermXUITests.xctrunner     # pre-rename leftover
+```
+
+Only `com.tether.app` is the app itself.
 
 In the app: tap **Add Folder**, pick a folder, and the terminal opens inside it. Type with
 the Mac keyboard (Simulator → I/O → Input → *Send Keyboard Input to Device*, or ⌘⇧K).

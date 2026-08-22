@@ -23,7 +23,7 @@
 // #define HAVE_DUP3
 // #define HAVE_PIPE2
 // #define HAVE_WAIT4
-// #define HAVE_SYSCTL
+#define HAVE_SYSCTL
 // #define HAVE_INT128
 #define HAVE_SA_LEN
 #define HAVE_PREADV
@@ -55,7 +55,7 @@
 // #define HAVE_RTLGENRANDOM
 // #define HAVE_EPOLL_PWAIT1
 // #define HAVE_EPOLL_PWAIT2
-// #define HAVE_GETDOMAINNAME
+#define HAVE_GETDOMAINNAME
 #define HAVE_MAP_ANONYMOUS
 #define HAVE_CLOCK_SETTIME
 // #define HAVE_SYS_GETRANDOM
