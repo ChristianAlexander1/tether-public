@@ -25,6 +25,8 @@ targets:
     sources:
       - path: App/TetherApp.swift
       - path: App/LicensesView.swift
+      - path: App/StorageView.swift
+      - path: App/WorkspaceFilesView.swift
       - path: App/IntegrationSource/TermXIntegration.swift
       - path: App/Resources
         optional: true

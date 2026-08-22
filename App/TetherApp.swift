@@ -60,13 +60,20 @@ struct RootView: View {
                 VStack(spacing: 14) {
                     Image(systemName: "folder.badge.plus").font(.system(size: 44)).foregroundStyle(.secondary)
                     Text("Choose a workspace").font(.title2.bold())
-                    Text("TermX runs commands only inside a folder you explicitly select.")
+                    Text("Tether runs commands only inside a folder you explicitly select.")
                         .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .padding()
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        NavigationLink("Licenses") { LicensesView() }
+                        Menu {
+                            NavigationLink { StorageView() } label: {
+                                Label("Storage", systemImage: "internaldrive")
+                            }
+                            NavigationLink { LicensesView() } label: {
+                                Label("Licenses", systemImage: "doc.text")
+                            }
+                        } label: { Image(systemName: "ellipsis.circle") }
                     }
                     ToolbarItem(placement: .primaryAction) {
                         Button("Add Folder") { Task { await model.addWorkspace() } }
@@ -82,12 +89,31 @@ struct WorkspaceView: View {
     @EnvironmentObject private var model: AppModel
     let workspace: Workspace
     @State private var session: TerminalSession?
+    @State private var resolvedPath: String?
     var body: some View {
         Group {
             if let session { TerminalSessionView(session: session, theme: $model.theme) }
             else { ProgressView("Opening workspace…") }
         }
         .navigationTitle(workspace.name)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    if let resolvedPath {
+                        NavigationLink {
+                            WorkspaceFilesView(rootPath: resolvedPath, title: workspace.name)
+                        } label: { Label("Files", systemImage: "folder") }
+                    }
+                    NavigationLink { StorageView() } label: {
+                        Label("Storage", systemImage: "internaldrive")
+                    }
+                    NavigationLink { LicensesView() } label: {
+                        Label("Licenses", systemImage: "doc.text")
+                    }
+                } label: { Image(systemName: "sidebar.leading") }
+                .accessibilityIdentifier("workspaceMenu")
+            }
+        }
         .task {
             if session == nil {
                 let path: String?
@@ -98,6 +124,7 @@ struct WorkspaceView: View {
                 path = try? model.workspaces.beginAccess(workspace)
                 #endif
                 if let path {
+                    resolvedPath = path
                     let newSession = TerminalSession(cwd: path, engine: model.engine)
                     session = newSession
                     try? newSession.start()
