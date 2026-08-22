@@ -81,3 +81,25 @@ unreliable; `claude` login end-to-end; the physical-device checklist.
 - The three xcframeworks (~708 MB) are **not** committed; rebuild them with the scripts in
   `Frameworks/README.md`.
 - Every change should keep all test suites green; see `../HOW-TO-RUN.md` for the commands.
+
+## Claude Code sessions (why they live where they do)
+
+Claude Code binds a session to the directory it was started in, and stores that project's
+transcripts and memory under `~/.claude/projects/<path-with-dashes>/`. When the repo moved
+from `~/Projects/terminal` to `~/Projects/tether`, the session data was copied across:
+
+```
+~/.claude/projects/-Users-dev-Projects-terminal/   # old
+~/.claude/projects/-Users-dev-Projects-tether/     # new (copy of the above)
+```
+
+So a session started in the new folder sees the same memory and can `--resume` the old
+conversations. If you ever move the repo again, copy the matching project folder the same
+way, and re-sync after quitting Claude so the final part of the transcript is included:
+
+```bash
+rsync -a ~/.claude/projects/-Users-dev-Projects-OLD/ \
+         ~/.claude/projects/-Users-dev-Projects-NEW/
+```
+
+The old empty `~/Projects/terminal` folder can be deleted once no session is running in it.
