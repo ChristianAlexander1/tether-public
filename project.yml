@@ -1,0 +1,93 @@
+name: Tether
+options:
+  bundleIdPrefix: com.tether
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  TermXUI:
+    path: Packages/TermXUI
+  TermXCore:
+    path: Packages/TermXCore
+  TermXFiles:
+    path: Packages/TermXFiles
+  TermXPython:
+    path: Packages/TermXPython
+  TermXNode:
+    path: Packages/TermXNode
+  TermXClaude:
+    path: Packages/TermXClaude
+  TermXLinux:
+    path: Packages/TermXLinux
+targets:
+  Tether:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/TetherApp.swift
+      - path: App/LicensesView.swift
+      - path: App/IntegrationSource/TermXIntegration.swift
+      - path: App/Resources
+        optional: true
+        buildPhase: resources
+    info:
+      path: App/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CFBundleDisplayName: Tether
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+    dependencies:
+      - package: TermXUI
+      - package: TermXCore
+      - package: TermXFiles
+      - package: TermXPython
+      - package: TermXNode
+      - package: TermXClaude
+      - package: TermXLinux
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tether.app
+        CODE_SIGNING_ALLOWED: "NO"
+        SWIFT_VERSION: "5.10"
+    postCompileScripts:
+      - name: Install Python Stdlib
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          # BeeWare Python-Apple-support: copy stdlib + convert .so → signed frameworks.
+          XCFRAMEWORK="Frameworks/TermXPython.xcframework"
+          if [ ! -d "$PROJECT_DIR/$XCFRAMEWORK" ]; then
+            XCFRAMEWORK="Packages/TermXPython/Vendor/TermXPython.xcframework"
+          fi
+          if [ ! -d "$PROJECT_DIR/$XCFRAMEWORK" ]; then
+            echo "error: TermXPython.xcframework not found for stdlib install" >&2
+            exit 1
+          fi
+          # Skip on macOS Catalyst / unexpected platforms; iPhoneOS + Simulator only.
+          case "${EFFECTIVE_PLATFORM_NAME:-}" in
+            -iphoneos|-iphonesimulator) ;;
+            *)
+              echo "note: skipping Python stdlib install for ${EFFECTIVE_PLATFORM_NAME:-unknown}"
+              exit 0
+              ;;
+          esac
+          source "$PROJECT_DIR/$XCFRAMEWORK/build/utils.sh"
+          # Identity "-" is fine when CODE_SIGNING_ALLOWED=NO (Simulator debug builds).
+          export EXPANDED_CODE_SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+          export EXPANDED_CODE_SIGN_IDENTITY_NAME="${EXPANDED_CODE_SIGN_IDENTITY_NAME:-Sign to Run Locally}"
+          install_python "$XCFRAMEWORK"
+  TetherUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: App/UITests
+    dependencies:
+      - target: Tether
+    settings:
+      base:
+        CODE_SIGNING_ALLOWED: "NO"
+        SWIFT_VERSION: "5.10"

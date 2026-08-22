@@ -1,119 +1,68 @@
-# TermX
+# Tether
 
-Native iOS / iPadOS terminal with an in-process shell, security-scoped workspaces, and
-embedded runtimes for **Python**, **Node.js**, **Claude Code**, and a **Linux (Blink)** guest.
+A real terminal for iPhone and iPad. Pick a folder, get a proper shell inside it — pipes,
+redirects, loops, `python3`, `node`, and a Linux package manager — all running on the
+device, with your files staying yours.
 
-This repo is set up for local git history now; when you create a remote later, push `main`
-and the full history comes along.
+```
+Documents % printf "one\ntwo\n" > src.txt
+Documents % awk '{print NR, $1}' src.txt
+1 one
+2 two
+Documents % python3 -c 'print(6*7)'
+42
+Documents % node -e 'console.log(2+2)'
+4
+Documents % linux /sbin/apk add git && git --version
+git version 2.45.4
+```
 
-## Status (2026-08-22)
+## Why it works at all
 
-The Simulator build runs a real pty shell plus embedded runtimes. See
-[`STATUS-AND-REWORK.md`](STATUS-AND-REWORK.md) and [`CHANGELOG.md`](CHANGELOG.md).
+iOS forbids `fork`/`exec`, so a normal terminal is impossible. Tether runs **every command
+inside the app process**: each one is a function invoked on its own thread with its own
+file descriptors, wired to a real pty. Python is embedded CPython, Node is nodejs-mobile,
+and anything else comes from an Alpine Linux userspace interpreted by Blink — which is how
+`apk add` installs from ~24,000 packages without ever executing downloaded native code.
 
-| Lane | Simulator |
-|---|---|
-| Shell (pipes, redirects, jobs, `if`/`while`/`case`) | Working |
-| Python 3.14 (`python3`, stdlib, `ssl`/`sqlite3`) | Working |
-| Node (`node -e`, shim) | Working |
-| Linux guest (`linux busybox …`, Alpine bootstrap) | Working |
-| Claude Code | Needs real account login |
+Everything bundled is under a permissive licence (MIT / BSD / ISC / Apache-2.0 / PSF), so
+the app can ship on the App Store.
+
+## Getting started
+
+- **Run it:** [`HOW-TO-RUN.md`](HOW-TO-RUN.md)
+- **Use it** (commands, installing and removing packages, storage): [`docs/USER-GUIDE.md`](docs/USER-GUIDE.md)
+- **Work on it** (architecture, rules, gotchas): [`docs/PROJECT-CONTEXT.md`](docs/PROJECT-CONTEXT.md)
+- **Current state and verified evidence:** [`STATUS-AND-REWORK.md`](STATUS-AND-REWORK.md)
+
+```bash
+xcodegen generate
+xcodebuild -project Tether.xcodeproj -scheme Tether \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -skipPackagePluginValidation -skipMacroValidation build
+```
+
+The three native xcframeworks (~708 MB: CPython, Node, Blink) are **not** in this repo —
+rebuild them with the scripts listed in [`Frameworks/README.md`](Frameworks/README.md).
 
 ## Layout
 
-```
-terminal/
-├── README.md                 ← you are here
-├── CHANGELOG.md
-├── STATUS-AND-REWORK.md
-├── docs/                     ← design + remaining-work briefs
-├── TermX/                    ← Xcode app + Swift packages
-│   ├── App/
-│   ├── Packages/             ← TermXUI, Core, Files, Python, Node, Claude, Linux
-│   ├── External/             ← TermXCommands, TermXShellLang, termx-shim
-│   ├── Frameworks/           ← build scripts + (gitignored) xcframeworks
-│   └── project.yml           ← XcodeGen
-└── _archive/                 ← earlier experiments
-```
-
-## Prerequisites
-
-- macOS with **Xcode 16+** (tested on Xcode 26 / iPhone 17 Pro Simulator)
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
-- GNU Make 4+ for Blink (`brew install make`)
-- Network once to fetch Python / Node / Alpine artifacts
-
-## First-time setup
-
-Large native frameworks are **not** in git (too big). Build them once:
-
-```bash
-# Python (BeeWare CPython 3.14)
-./TermX/Packages/TermXPython/Scripts/build-termx-python-xcframework.sh
-
-# Node (nodejs-mobile)
-./TermX/Frameworks/build-nodejs-mobile.sh
-
-# Blink Linux emulator (host + iOS xcframework)
-./TermX/Frameworks/build-blink.sh
-```
-
-Symlinks under `Packages/*/Vendor/` already point at `Frameworks/*.xcframework`.
-
-## Build & run
-
-```bash
-cd TermX
-xcodegen generate
-xcodebuild -project TermX.xcodeproj -scheme TermX \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -skipPackagePluginValidation -skipMacroValidation build
-
-xcrun simctl install "iPhone 17 Pro" \
-  ~/Library/Developer/Xcode/DerivedData/TermX-*/Build/Products/Debug-iphonesimulator/TermX.app
-xcrun simctl launch "iPhone 17 Pro" com.termx.app
-```
-
-DEBUG harness (skips folder picker, types commands):
-
-```bash
-SIMCTL_CHILD_TERMX_AUTOWORKSPACE=1 \
-SIMCTL_CHILD_TERMX_AUTOCOMMANDS=$'echo hi > a.txt\nls | wc -l > count.txt' \
-xcrun simctl launch "iPhone 17 Pro" com.termx.app
-```
-
-## Package tests (host)
-
-```bash
-for p in TermXCore TermXFiles TermXNode TermXClaude TermXPython TermXLinux; do
-  (cd TermX/Packages/$p && swift test)
-done
-(cd TermX/External/termx-shim && npm test)
-```
-
-## Docs
-
-| Doc | Purpose |
+| Path | What |
 |---|---|
-| [`docs/00-MASTER-PLAN.md`](docs/00-MASTER-PLAN.md) | Product plan |
-| [`docs/09-integration-contracts.md`](docs/09-integration-contracts.md) | Frozen APIs |
-| [`docs/10-remaining-work.md`](docs/10-remaining-work.md) | Agent handoff tasks |
-| [`TermX/docs/DEVICE-PASS.md`](TermX/docs/DEVICE-PASS.md) | Physical-device checklist |
-| [`TermX/External/INTEGRATION-NOTES.md`](TermX/External/INTEGRATION-NOTES.md) | External package wiring |
+| `App/` | SwiftUI app target, integration wiring, UI tests |
+| `Packages/TermXCore` | Shell parser, command engine, built-in commands |
+| `Packages/TermXUI` | SwiftTerm terminal view, pty, themes, keyboard bar |
+| `Packages/TermXFiles` | Folder picker, security-scoped bookmarks, workspaces |
+| `Packages/TermXPython` · `TermXNode` · `TermXLinux` · `TermXClaude` | Runtime lanes |
+| `External/` | Packages built standalone: shell language, extra commands, the Node shim |
+| `Frameworks/` | Build scripts and notices for the native binaries |
+| `docs/` | Plans, contracts, guides, remaining work |
 
-## Licensing
+*(Swift module names still carry the project's former `TermX` prefix; the shipped app is
+Tether.)*
 
-Third-party notices live under `TermX/NOTICES/`, `TermX/Frameworks/NOTICES/`, and
-`TermX/Packages/TermXUI/NOTICES/`. In the app: home screen → **Licenses**.
+## Status
 
-No GPL/LGPL in the product target. Guest Alpine packages are downloaded by the user at runtime.
-
-## Creating a remote later
-
-```bash
-# after you create an empty GitHub/GitLab repo:
-git remote add origin git@github.com:YOU/termx.git
-git push -u origin main
-```
-
-Local history (this `main` branch) is what gets pushed — no rebase required if you start here.
+The shell, Python, Node, the Linux lane and the folder picker are working and verified on
+the Simulator; 220 tests pass across nine packages. Remaining work is tracked in
+[`docs/10-remaining-work.md`](docs/10-remaining-work.md).

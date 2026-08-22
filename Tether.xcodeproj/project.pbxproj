@@ -1,0 +1,612 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0FA122C2D24D64AA37BEA89F /* nodejs-mobile-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 45A2818B6F4B9122AABB0CD0 /* nodejs-mobile-MIT.txt */; };
+		187B1AB6C8C6133973A2AA03 /* TermXUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1C218C37C383D86FD28F274B /* TermXUI */; };
+		22469AFCF24C6E86A8EFAA5F /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDCFA4C9A1DF10C2D3AA1EBD /* LicensesView.swift */; };
+		27E39B49EBE68AC0F1077C01 /* SwiftTerm-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = D039FC37EA04581221A1AE9F /* SwiftTerm-MIT.txt */; };
+		2F38AC268B12F85297C94FDE /* TermXLinux in Frameworks */ = {isa = PBXBuildFile; productRef = 67F03DE87792ABE67C90AED1 /* TermXLinux */; };
+		35C0B6D3A4B4F2DB4D66A801 /* TermXIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A471776D23739CB33A7D1C45 /* TermXIntegration.swift */; };
+		58FB1E1189031ADCC91266EB /* CPython-PSF.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5473D5D5148F294F233904FE /* CPython-PSF.txt */; };
+		62EB64BA20D3479FB472F9EB /* TermXClaude in Frameworks */ = {isa = PBXBuildFile; productRef = 77D8F61BEA5FE488F36F08DD /* TermXClaude */; };
+		6BD1075144A83F88ABDCED51 /* TermXNode in Frameworks */ = {isa = PBXBuildFile; productRef = 580726BE37C058579000358B /* TermXNode */; };
+		78B918089B86C1072D4114C8 /* JetBrainsMono-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = EF0006C74E7E930CD4C61986 /* JetBrainsMono-OFL.txt */; };
+		79403EDD25F842FBF8059A8D /* Blink-ISC.txt in Resources */ = {isa = PBXBuildFile; fileRef = 941DD19662831CB65C0FFFD7 /* Blink-ISC.txt */; };
+		87A13BFB2E35BD9BBBC18D19 /* TetherApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B744DD409A97EBA596458FC3 /* TetherApp.swift */; };
+		A923FBB3708E4F56E83E5833 /* TermXFiles in Frameworks */ = {isa = PBXBuildFile; productRef = 5F3EBCFC2324B7A6ECFBCECD /* TermXFiles */; };
+		AA554DEB604ABC9BDA3F5808 /* Python-Apple-support-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 3A86CE8DDC61D9888B45748D /* Python-Apple-support-MIT.txt */; };
+		B7096884BDF1A1238A5E20E4 /* TerminalTypingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60D6A68C930567AD8071E028 /* TerminalTypingTests.swift */; };
+		CDB6A28B4A14D785D6C7CB3D /* TermXPython in Frameworks */ = {isa = PBXBuildFile; productRef = A56AE5B621BDC165D14BB831 /* TermXPython */; };
+		DD4F064FFAF7B5A78E852ECD /* TermXCore in Frameworks */ = {isa = PBXBuildFile; productRef = 73BD062FC4D571950C0020FA /* TermXCore */; };
+		ED828C7F00EB6B8501EB1324 /* FolderPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF4D7CC447AD4DFD564CBDA /* FolderPickerTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		63DBFD67FA1AB6F5F9305911 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D154414679B8355E89FB1B6A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 45C693A1C79CDAB203A19612;
+			remoteInfo = Tether;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		20E61DA33307688868971A6C /* TermXPython */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXPython; path = Packages/TermXPython; sourceTree = SOURCE_ROOT; };
+		2F2CA052180B01BD2A5B6260 /* Tether.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Tether.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3A86CE8DDC61D9888B45748D /* Python-Apple-support-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Python-Apple-support-MIT.txt"; sourceTree = "<group>"; };
+		45A2818B6F4B9122AABB0CD0 /* nodejs-mobile-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "nodejs-mobile-MIT.txt"; sourceTree = "<group>"; };
+		5473D5D5148F294F233904FE /* CPython-PSF.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "CPython-PSF.txt"; sourceTree = "<group>"; };
+		5DF4D7CC447AD4DFD564CBDA /* FolderPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPickerTests.swift; sourceTree = "<group>"; };
+		60D6A68C930567AD8071E028 /* TerminalTypingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTypingTests.swift; sourceTree = "<group>"; };
+		62F41048A949F1756E815092 /* TermXCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXCore; path = Packages/TermXCore; sourceTree = SOURCE_ROOT; };
+		69D1A379300182F229FE80E0 /* TermXFiles */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXFiles; path = Packages/TermXFiles; sourceTree = SOURCE_ROOT; };
+		77EE2413C9A28F64E58F69FE /* TermXNode */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXNode; path = Packages/TermXNode; sourceTree = SOURCE_ROOT; };
+		8F03D568A09D680B362F7F58 /* TetherUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TetherUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		941DD19662831CB65C0FFFD7 /* Blink-ISC.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Blink-ISC.txt"; sourceTree = "<group>"; };
+		A3C92134B3E7A5BF8C3A460D /* TermXClaude */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXClaude; path = Packages/TermXClaude; sourceTree = SOURCE_ROOT; };
+		A471776D23739CB33A7D1C45 /* TermXIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TermXIntegration.swift; sourceTree = "<group>"; };
+		B744DD409A97EBA596458FC3 /* TetherApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TetherApp.swift; sourceTree = "<group>"; };
+		CEC344C64C4F792976756B1E /* TermXLinux */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXLinux; path = Packages/TermXLinux; sourceTree = SOURCE_ROOT; };
+		D039FC37EA04581221A1AE9F /* SwiftTerm-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "SwiftTerm-MIT.txt"; sourceTree = "<group>"; };
+		EDCFA4C9A1DF10C2D3AA1EBD /* LicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
+		EF0006C74E7E930CD4C61986 /* JetBrainsMono-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "JetBrainsMono-OFL.txt"; sourceTree = "<group>"; };
+		FA27303C63C62B80035CEB2D /* TermXUI */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXUI; path = Packages/TermXUI; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		EEE04766517343F27C1B53D1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				187B1AB6C8C6133973A2AA03 /* TermXUI in Frameworks */,
+				DD4F064FFAF7B5A78E852ECD /* TermXCore in Frameworks */,
+				A923FBB3708E4F56E83E5833 /* TermXFiles in Frameworks */,
+				CDB6A28B4A14D785D6C7CB3D /* TermXPython in Frameworks */,
+				6BD1075144A83F88ABDCED51 /* TermXNode in Frameworks */,
+				62EB64BA20D3479FB472F9EB /* TermXClaude in Frameworks */,
+				2F38AC268B12F85297C94FDE /* TermXLinux in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		14A62FFE4D722F78E73DEC24 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				EDCFA4C9A1DF10C2D3AA1EBD /* LicensesView.swift */,
+				B744DD409A97EBA596458FC3 /* TetherApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		2D89F588FC699EDD6E33403A = {
+			isa = PBXGroup;
+			children = (
+				14A62FFE4D722F78E73DEC24 /* App */,
+				917A7F1338E14F6221076288 /* IntegrationSource */,
+				3C547BB1F615B14482BCADFB /* Packages */,
+				680C0E4BFA4539F9AD8102E6 /* Resources */,
+				4EAED0FD1CFA0AF8AFE37C2B /* UITests */,
+				B69029C48B0586990A516091 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		335A5018890163DBCB906362 /* NOTICES */ = {
+			isa = PBXGroup;
+			children = (
+				941DD19662831CB65C0FFFD7 /* Blink-ISC.txt */,
+				5473D5D5148F294F233904FE /* CPython-PSF.txt */,
+				EF0006C74E7E930CD4C61986 /* JetBrainsMono-OFL.txt */,
+				45A2818B6F4B9122AABB0CD0 /* nodejs-mobile-MIT.txt */,
+				3A86CE8DDC61D9888B45748D /* Python-Apple-support-MIT.txt */,
+				D039FC37EA04581221A1AE9F /* SwiftTerm-MIT.txt */,
+			);
+			path = NOTICES;
+			sourceTree = "<group>";
+		};
+		3C547BB1F615B14482BCADFB /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				A3C92134B3E7A5BF8C3A460D /* TermXClaude */,
+				62F41048A949F1756E815092 /* TermXCore */,
+				69D1A379300182F229FE80E0 /* TermXFiles */,
+				CEC344C64C4F792976756B1E /* TermXLinux */,
+				77EE2413C9A28F64E58F69FE /* TermXNode */,
+				20E61DA33307688868971A6C /* TermXPython */,
+				FA27303C63C62B80035CEB2D /* TermXUI */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		4EAED0FD1CFA0AF8AFE37C2B /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				5DF4D7CC447AD4DFD564CBDA /* FolderPickerTests.swift */,
+				60D6A68C930567AD8071E028 /* TerminalTypingTests.swift */,
+			);
+			name = UITests;
+			path = App/UITests;
+			sourceTree = "<group>";
+		};
+		680C0E4BFA4539F9AD8102E6 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				335A5018890163DBCB906362 /* NOTICES */,
+			);
+			name = Resources;
+			path = App/Resources;
+			sourceTree = "<group>";
+		};
+		917A7F1338E14F6221076288 /* IntegrationSource */ = {
+			isa = PBXGroup;
+			children = (
+				A471776D23739CB33A7D1C45 /* TermXIntegration.swift */,
+			);
+			name = IntegrationSource;
+			path = App/IntegrationSource;
+			sourceTree = "<group>";
+		};
+		B69029C48B0586990A516091 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				2F2CA052180B01BD2A5B6260 /* Tether.app */,
+				8F03D568A09D680B362F7F58 /* TetherUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		45C693A1C79CDAB203A19612 /* Tether */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9A637A0E4EA6503338E34F81 /* Build configuration list for PBXNativeTarget "Tether" */;
+			buildPhases = (
+				84364C43EE0F731B4D60D042 /* Sources */,
+				4C23423604DCB3BFF65C9BD6 /* Install Python Stdlib */,
+				2E9501BBFD70CAADDF153614 /* Resources */,
+				EEE04766517343F27C1B53D1 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Tether;
+			packageProductDependencies = (
+				1C218C37C383D86FD28F274B /* TermXUI */,
+				73BD062FC4D571950C0020FA /* TermXCore */,
+				5F3EBCFC2324B7A6ECFBCECD /* TermXFiles */,
+				A56AE5B621BDC165D14BB831 /* TermXPython */,
+				580726BE37C058579000358B /* TermXNode */,
+				77D8F61BEA5FE488F36F08DD /* TermXClaude */,
+				67F03DE87792ABE67C90AED1 /* TermXLinux */,
+			);
+			productName = Tether;
+			productReference = 2F2CA052180B01BD2A5B6260 /* Tether.app */;
+			productType = "com.apple.product-type.application";
+		};
+		E4F45079B2C38E1290AE2E14 /* TetherUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6BB8C40B019318518B19A374 /* Build configuration list for PBXNativeTarget "TetherUITests" */;
+			buildPhases = (
+				0694B805F2B224C25BBAB56D /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9430F3224AB2DBF7A6CA56E2 /* PBXTargetDependency */,
+			);
+			name = TetherUITests;
+			packageProductDependencies = (
+			);
+			productName = TetherUITests;
+			productReference = 8F03D568A09D680B362F7F58 /* TetherUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D154414679B8355E89FB1B6A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					E4F45079B2C38E1290AE2E14 = {
+						TestTargetID = 45C693A1C79CDAB203A19612;
+					};
+				};
+			};
+			buildConfigurationList = 017D4C49749D6CD76AC06D39 /* Build configuration list for PBXProject "Tether" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2D89F588FC699EDD6E33403A;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C5BDEB5BD02CF1960999BBAB /* XCLocalSwiftPackageReference "Packages/TermXClaude" */,
+				F639CD029C96D1D7AB8DA31B /* XCLocalSwiftPackageReference "Packages/TermXCore" */,
+				CF7021BEAB78703546DB86D4 /* XCLocalSwiftPackageReference "Packages/TermXFiles" */,
+				E9BD46CA4642B4AF6722333C /* XCLocalSwiftPackageReference "Packages/TermXLinux" */,
+				3EBBAA98AE99F9DAAD8BCB95 /* XCLocalSwiftPackageReference "Packages/TermXNode" */,
+				B6FF80F2E824FFF1D38FB554 /* XCLocalSwiftPackageReference "Packages/TermXPython" */,
+				E5F19B305EEE9324479AD77B /* XCLocalSwiftPackageReference "Packages/TermXUI" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B69029C48B0586990A516091 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				45C693A1C79CDAB203A19612 /* Tether */,
+				E4F45079B2C38E1290AE2E14 /* TetherUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		2E9501BBFD70CAADDF153614 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				79403EDD25F842FBF8059A8D /* Blink-ISC.txt in Resources */,
+				58FB1E1189031ADCC91266EB /* CPython-PSF.txt in Resources */,
+				78B918089B86C1072D4114C8 /* JetBrainsMono-OFL.txt in Resources */,
+				AA554DEB604ABC9BDA3F5808 /* Python-Apple-support-MIT.txt in Resources */,
+				27E39B49EBE68AC0F1077C01 /* SwiftTerm-MIT.txt in Resources */,
+				0FA122C2D24D64AA37BEA89F /* nodejs-mobile-MIT.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		4C23423604DCB3BFF65C9BD6 /* Install Python Stdlib */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Install Python Stdlib";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n# BeeWare Python-Apple-support: copy stdlib + convert .so → signed frameworks.\nXCFRAMEWORK=\"Frameworks/TermXPython.xcframework\"\nif [ ! -d \"$PROJECT_DIR/$XCFRAMEWORK\" ]; then\n  XCFRAMEWORK=\"Packages/TermXPython/Vendor/TermXPython.xcframework\"\nfi\nif [ ! -d \"$PROJECT_DIR/$XCFRAMEWORK\" ]; then\n  echo \"error: TermXPython.xcframework not found for stdlib install\" >&2\n  exit 1\nfi\n# Skip on macOS Catalyst / unexpected platforms; iPhoneOS + Simulator only.\ncase \"${EFFECTIVE_PLATFORM_NAME:-}\" in\n  -iphoneos|-iphonesimulator) ;;\n  *)\n    echo \"note: skipping Python stdlib install for ${EFFECTIVE_PLATFORM_NAME:-unknown}\"\n    exit 0\n    ;;\nesac\nsource \"$PROJECT_DIR/$XCFRAMEWORK/build/utils.sh\"\n# Identity \"-\" is fine when CODE_SIGNING_ALLOWED=NO (Simulator debug builds).\nexport EXPANDED_CODE_SIGN_IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:--}\"\nexport EXPANDED_CODE_SIGN_IDENTITY_NAME=\"${EXPANDED_CODE_SIGN_IDENTITY_NAME:-Sign to Run Locally}\"\ninstall_python \"$XCFRAMEWORK\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0694B805F2B224C25BBAB56D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ED828C7F00EB6B8501EB1324 /* FolderPickerTests.swift in Sources */,
+				B7096884BDF1A1238A5E20E4 /* TerminalTypingTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		84364C43EE0F731B4D60D042 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				22469AFCF24C6E86A8EFAA5F /* LicensesView.swift in Sources */,
+				35C0B6D3A4B4F2DB4D66A801 /* TermXIntegration.swift in Sources */,
+				87A13BFB2E35BD9BBBC18D19 /* TetherApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		9430F3224AB2DBF7A6CA56E2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 45C693A1C79CDAB203A19612 /* Tether */;
+			targetProxy = 63DBFD67FA1AB6F5F9305911 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		158B7230060205C7337A6242 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tether.TetherUITests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Tether;
+			};
+			name = Release;
+		};
+		436F9F17F3459D7343957521 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tether.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A4E4DABBE84A839124A51ABB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tether.TetherUITests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Tether;
+			};
+			name = Debug;
+		};
+		D2784D8591C2AF5B0DF6929F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tether.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		E1FE9267F36E54A4080B91CD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		EB087D9D5C4201A47C3DBE0E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		017D4C49749D6CD76AC06D39 /* Build configuration list for PBXProject "Tether" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E1FE9267F36E54A4080B91CD /* Debug */,
+				EB087D9D5C4201A47C3DBE0E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6BB8C40B019318518B19A374 /* Build configuration list for PBXNativeTarget "TetherUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A4E4DABBE84A839124A51ABB /* Debug */,
+				158B7230060205C7337A6242 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9A637A0E4EA6503338E34F81 /* Build configuration list for PBXNativeTarget "Tether" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D2784D8591C2AF5B0DF6929F /* Debug */,
+				436F9F17F3459D7343957521 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		3EBBAA98AE99F9DAAD8BCB95 /* XCLocalSwiftPackageReference "Packages/TermXNode" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXNode;
+		};
+		B6FF80F2E824FFF1D38FB554 /* XCLocalSwiftPackageReference "Packages/TermXPython" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXPython;
+		};
+		C5BDEB5BD02CF1960999BBAB /* XCLocalSwiftPackageReference "Packages/TermXClaude" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXClaude;
+		};
+		CF7021BEAB78703546DB86D4 /* XCLocalSwiftPackageReference "Packages/TermXFiles" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXFiles;
+		};
+		E5F19B305EEE9324479AD77B /* XCLocalSwiftPackageReference "Packages/TermXUI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXUI;
+		};
+		E9BD46CA4642B4AF6722333C /* XCLocalSwiftPackageReference "Packages/TermXLinux" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXLinux;
+		};
+		F639CD029C96D1D7AB8DA31B /* XCLocalSwiftPackageReference "Packages/TermXCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TermXCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1C218C37C383D86FD28F274B /* TermXUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXUI;
+		};
+		580726BE37C058579000358B /* TermXNode */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXNode;
+		};
+		5F3EBCFC2324B7A6ECFBCECD /* TermXFiles */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXFiles;
+		};
+		67F03DE87792ABE67C90AED1 /* TermXLinux */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXLinux;
+		};
+		73BD062FC4D571950C0020FA /* TermXCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXCore;
+		};
+		77D8F61BEA5FE488F36F08DD /* TermXClaude */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXClaude;
+		};
+		A56AE5B621BDC165D14BB831 /* TermXPython */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TermXPython;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = D154414679B8355E89FB1B6A /* Project object */;
+}
