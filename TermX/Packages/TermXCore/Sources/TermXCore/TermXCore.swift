@@ -162,7 +162,12 @@ public enum ShellLexer {
         var quote: Character?
         var escaped = false
         for character in input {
-            if escaped { current.append(character); escaped = false; continue }
+            if escaped {
+                // POSIX: inside double quotes a backslash is literal unless it escapes
+                // $ ` " \\ or newline, so `printf "a\\nb"` keeps its `\\n`.
+                if quote == "\"", !"$`\"\\\n".contains(character) { current.append("\\") }
+                current.append(character); escaped = false; continue
+            }
             if character == "\\" && quote != "'" { escaped = true; continue }
             if let active = quote {
                 if character == active { quote = nil } else { current.append(character) }

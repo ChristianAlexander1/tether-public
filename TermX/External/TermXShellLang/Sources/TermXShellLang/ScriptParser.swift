@@ -76,6 +76,8 @@ public enum ScriptParser {
             if case .lbrace = t { return true }
         }
         // Function definition detected structurally: name ( ) {.
+        // Guard the subtraction: a one-token line (`ls`) would otherwise form 0..<(-1).
+        guard tokens.count >= 3 else { return false }
         for i in 0..<(tokens.count - 2) {
             if case .word = tokens[i], case .lparen = tokens[i + 1],
                case .rparen = tokens[i + 2] {

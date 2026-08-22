@@ -179,6 +179,11 @@ public enum ShellParser {
             let c = chars[i]
 
             if escaped {
+                // Inside double quotes a backslash is literal unless it escapes one of
+                // $ ` " \ or a newline (POSIX), so `printf "a\nb"` still receives `\n`.
+                if quote == "\"", !"$`\"\\\n".contains(c) {
+                    result.append("\\")
+                }
                 result.append(c)
                 escaped = false
                 sawContent = true
@@ -352,6 +357,9 @@ public enum VariableExpander {
 
         while i < chars.count {
             if chars[i] == "\\" && i + 1 < chars.count {
+                // Quote removal already ran in the lexer. Here a backslash only hides a
+                // `$` from expansion; every other one is data (`printf "a\\nb"`).
+                if chars[i + 1] != "$" { result.append("\\") }
                 result.append(chars[i + 1])
                 i += 2
                 continue

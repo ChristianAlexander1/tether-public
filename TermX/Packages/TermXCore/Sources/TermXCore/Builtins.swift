@@ -327,7 +327,12 @@ public final class Builtins {
             i += 1
         }
 
-        // Output is handled by the registry writer
+        // Emit the formatted text: nothing else writes it.
+        if let proc = ProcessContext.current {
+            proc.writeStdout(result)
+        } else {
+            print(result, terminator: "")
+        }
         return 0
     }
 

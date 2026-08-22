@@ -65,7 +65,7 @@ final class NodeMobileRuntime: NodeRuntime {
 
         return NodeStdioBridge.withRedirectedOutput(stdoutFD: job.stdoutFD, stderrFD: job.stderrFD) {
             let stdinPump = Self.startStdinPump(from: job.stdinFD)
-            defer { stdinPump?.cancel() }
+            defer { stdinPump?.stop() }
 
             let wrote = request.withUnsafeBytes { raw in
                 write(jobWriteFD, raw.baseAddress!, request.count)
@@ -196,20 +196,59 @@ final class NodeMobileRuntime: NodeRuntime {
         return nil
     }
 
-    private static func startStdinPump(from fd: Int32) -> DispatchWorkItem? {
-        guard fd >= 0 else { return nil }
-        let work = DispatchWorkItem {
+    /// Forwards the job's stdin into the embedded engine for as long as the job runs.
+    ///
+    /// The pump must be stoppable: `DispatchWorkItem.cancel()` cannot interrupt a thread
+    /// already blocked in `read()`, and this fd is the terminal's pty. Left running, a
+    /// finished job's pump keeps swallowing everything the user types afterwards, so the
+    /// loop polls with a timeout and checks a stop flag instead of blocking forever.
+    final class StdinPump {
+        private let fd: Int32
+        private let lock = NSLock()
+        private var stopped = false
+        private let finished = DispatchSemaphore(value: 0)
+
+        init(fd: Int32) {
+            self.fd = fd
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.loop()
+            }
+        }
+
+        private var isStopped: Bool {
+            lock.lock(); defer { lock.unlock() }; return stopped
+        }
+
+        private func loop() {
+            defer { finished.signal() }
             var buf = [UInt8](repeating: 0, count: 4096)
-            while true {
+            while !isStopped {
+                var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+                let ready = poll(&pfd, 1, 50)
+                if ready < 0 {
+                    if errno == EINTR { continue }
+                    return
+                }
+                if ready == 0 { continue }
+                if pfd.revents & Int16(POLLNVAL) != 0 { return }
                 let n = read(fd, &buf, buf.count)
-                if n <= 0 { break }
+                if n < 0 && (errno == EINTR || errno == EAGAIN) { continue }
+                if n <= 0 { return }
                 _ = buf.withUnsafeBytes { raw in
                     write(STDIN_FILENO, raw.baseAddress!, n)
                 }
             }
         }
-        DispatchQueue.global(qos: .userInitiated).async(execute: work)
-        return work
+
+        func stop() {
+            lock.lock(); stopped = true; lock.unlock()
+            _ = finished.wait(timeout: .now() + 1.0)
+        }
+    }
+
+    private static func startStdinPump(from fd: Int32) -> StdinPump? {
+        guard fd >= 0 else { return nil }
+        return StdinPump(fd: fd)
     }
 
     private func writeStderr(_ job: NodeRunningJob, _ message: String) {

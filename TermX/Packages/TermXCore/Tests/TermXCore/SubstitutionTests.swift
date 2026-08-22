@@ -37,3 +37,26 @@ final class SubstitutionTests: XCTestCase {
         XCTAssertTrue(out.contains("3"), "got: \(out)")
     }
 }
+
+/// Regression: builtins must actually emit their output.
+final class PrintfTests: XCTestCase {
+    private func run(_ line: String) -> String {
+        var captured = ""
+        let dir = NSTemporaryDirectory()
+        let session = ShellSession(cwd: dir, environment: ["HOME": dir, "PATH": "/bin"]) { captured += $0 }
+        _ = session.eval(line)
+        return captured
+    }
+
+    func testPrintfWritesPlainText() {
+        XCTAssertEqual(run("printf hello"), "hello")
+    }
+
+    func testPrintfExpandsEscapes() {
+        XCTAssertEqual(run(#"printf "one\ntwo\n""#), "one\ntwo\n")
+    }
+
+    func testPrintfFormatsArguments() {
+        XCTAssertEqual(run(#"printf "%s-%d\n" abc 42"#), "abc-42\n")
+    }
+}

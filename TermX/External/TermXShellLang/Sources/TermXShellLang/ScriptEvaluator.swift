@@ -96,6 +96,14 @@ public final class ScriptEvaluator {
                 case .continueFlow(let n): return .continueFlow(n)
                 }
             }
+            // A plain `NAME=value` assignment must update the evaluator's own variables,
+            // otherwise a later `$NAME` in the same script (a loop condition, say) still
+            // expands from the stale copy. Keep the host in sync too.
+            if let (name, value) = Self.simpleAssignment(expanded) {
+                variables[name] = value
+                host.setValue(value, for: name)
+                return .normal(0)
+            }
             let code = host.run(commandLine: expanded)
             return .normal(code)
 
@@ -345,6 +353,20 @@ public final class ScriptEvaluator {
     /// True when `line` contains no shell operators that would make it a compound
     /// command (pipes, redirections, separators, backgrounding, logic operators).
     /// Function invocation is only intercepted for simple commands.
+    /// Recognises `NAME=value` (and `NAME=`) with no command following it.
+    static func simpleAssignment(_ line: String) -> (String, String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard let eq = trimmed.firstIndex(of: "=") else { return nil }
+        let name = String(trimmed[trimmed.startIndex..<eq])
+        guard !name.isEmpty,
+              name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }),
+              !(name.first?.isNumber ?? true) else { return nil }
+        let value = String(trimmed[trimmed.index(after: eq)...])
+        // `a=b c` is an assignment prefix on a command, not a plain assignment.
+        guard !value.contains(" ") || (value.hasPrefix("\"") && value.hasSuffix("\"")) else { return nil }
+        return (name, value.trimmingCharacters(in: CharacterSet(charactersIn: "\"'")))
+    }
+
     private func isSimpleCommand(_ line: String) -> Bool {
         for c in line {
             if c == "|" || c == "&" || c == ";" || c == "<" || c == ">" { return false }

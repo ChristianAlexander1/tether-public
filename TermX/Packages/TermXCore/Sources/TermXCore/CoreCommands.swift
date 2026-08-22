@@ -164,6 +164,9 @@ public enum CoreCommands {
     /// Returns nil when no readable stdin is attached.
     static func readAllStdin() -> String? {
         guard let proc = ProcessContext.current, proc.stdinFD >= 0 else { return nil }
+        // A terminal never sends EOF, so slurping it would hang the shell forever.
+        // Interactive stdin means "no piped input" for these read-to-end commands.
+        if isatty(proc.stdinFD) == 1 { return nil }
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 8192)
         while true {

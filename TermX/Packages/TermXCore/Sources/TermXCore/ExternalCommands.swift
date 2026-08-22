@@ -21,6 +21,7 @@ public enum ExternalCommands {
         let proc = ProcessContext.current
         let cwd = proc?.cwd ?? FileManager.default.currentDirectoryPath
         let environ = proc?.environ ?? [:]
+        // Only piped/redirected stdin is consumed; readAllStdin() returns nil for a tty.
         let stdin = CoreCommands.readAllStdin() ?? ""
         let io = CommandIO(argv: argv, stdin: stdin, cwd: cwd, environment: environ)
         let result = cmdType.run(io)
