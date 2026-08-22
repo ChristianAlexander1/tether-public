@@ -1,28 +1,28 @@
-# How to run and test TermX
+# How to run and test Tether
 
 ## Run it
 
 ```bash
-cd ~/Projects/terminal/TermX
+cd ~/Projects/tether
 
 # 1. (only after changing project.yml) regenerate the Xcode project
 xcodegen generate
 
 # 2. build
-xcodebuild -project TermX.xcodeproj -scheme TermX \
+xcodebuild -project Tether.xcodeproj -scheme Tether \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -skipPackagePluginValidation -skipMacroValidation build
 
 # 3. install + launch on the Simulator
 open -a Simulator
-APP=$(xcodebuild -project TermX.xcodeproj -scheme TermX \
+APP=$(xcodebuild -project Tether.xcodeproj -scheme Tether \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -showBuildSettings 2>/dev/null \
   | awk '/ BUILT_PRODUCTS_DIR/{d=$3} /FULL_PRODUCT_NAME/{n=$3} END{print d"/"n}')
 xcrun simctl install "iPhone 17 Pro" "$APP"
-xcrun simctl launch "iPhone 17 Pro" com.termx.app
+xcrun simctl launch "iPhone 17 Pro" com.tether.app
 ```
 
-Or just open `TermX.xcodeproj` in Xcode and press ⌘R.
+Or just open `Tether.xcodeproj` in Xcode and press ⌘R.
 
 In the app: tap **Add Folder**, pick a folder, and the terminal opens inside it. Type with
 the Mac keyboard (Simulator → I/O → Input → *Send Keyboard Input to Device*, or ⌘⇧K).
@@ -81,7 +81,7 @@ Measured after installing git: the whole Alpine rootfs was **22 MB** (git itself
 changes nothing; it is ordinary storage on disk. It goes away only when you:
 
 - delete the app (removes the whole sandbox, including everything installed), or
-- `xcrun simctl uninstall "iPhone 17 Pro" com.termx.app`, or
+- `xcrun simctl uninstall "iPhone 17 Pro" com.tether.app`, or
 - erase the simulator: `xcrun simctl erase "iPhone 17 Pro"`, or
 - delete the folder yourself from the terminal, e.g. `rm -rf $HOME/Documents/linux`.
 
@@ -93,24 +93,24 @@ iPhone Storage → TermX. Nothing is written outside the app except in the folde
 DEBUG builds accept two env hooks, so you can run a batch and check the results:
 
 ```bash
-D=$(xcrun simctl get_app_container "iPhone 17 Pro" com.termx.app data)/Documents
+D=$(xcrun simctl get_app_container "iPhone 17 Pro" com.tether.app data)/Documents
 SIMCTL_CHILD_TERMX_AUTOWORKSPACE=1 \
 SIMCTL_CHILD_TERMX_AUTOCOMMANDS='python3 -c "print(6*7)" > py.txt
 node -e "console.log(2+2)" > node.txt
 linux /usr/bin/git --version > git.txt 2>&1' \
-xcrun simctl launch "iPhone 17 Pro" com.termx.app
+xcrun simctl launch "iPhone 17 Pro" com.tether.app
 sleep 20 && cat "$D"/py.txt "$D"/node.txt "$D"/git.txt
 ```
 
 ## Run the test suites
 
 ```bash
-cd ~/Projects/terminal/TermX
+cd ~/Projects/tether
 for p in TermXCore TermXFiles TermXNode TermXClaude TermXPython TermXLinux; do
   (cd Packages/$p && swift test); done
 for p in TermXShellLang TermXCommands; do (cd External/$p && swift test); done
 (cd External/termx-shim && npm test)
-xcodebuild -scheme TermX -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+xcodebuild -scheme Tether -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -skipPackagePluginValidation -skipMacroValidation test
 ```
 

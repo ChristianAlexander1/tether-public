@@ -1,4 +1,4 @@
-# TermX Full-Build Audit
+# Tether Full-Build Audit
 
 The repository now contains the full planned component graph and a native SwiftUI app shell. The Swift package layer is implemented for C1 through C6, with frozen interfaces preserved across the components. However, the master plan’s phrase “full build” also requires native runtime binaries, a real Xcode application target, and device validation. Those release-critical artifacts cannot be produced or tested in this Linux environment.
 

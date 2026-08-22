@@ -1,4 +1,4 @@
-# TermX Full Build Scope
+# Tether Full Build Scope
 
 The supplied archive contains the master plan, C1 terminal UI specification, App Store licensing policy, and frozen integration contracts. The master plan references six additional component specifications that were not included: C2 shell core, C3 filesystem, C4 runtimes, C5 Claude integration, C6 Linux emulation, and C8 roadmap.
 

@@ -1,4 +1,4 @@
-# TermX physical-device pass
+# Tether physical-device pass
 
 Manual checklist for a real iPhone/iPad. Automated package tests cover logic; this pass confirms sandbox, security-scoped bookmarks, and UI on device.
 

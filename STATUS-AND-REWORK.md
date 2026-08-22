@@ -1,9 +1,9 @@
-# TermX — Integration Status
+# Tether — Integration Status
 *Last integration pass: 2026-08-22 · Xcode 26.2 · iPhone 17 Pro Simulator (iOS 26)*
 
 ## Headline
 
-**The app builds, launches, and runs a real terminal with embedded Python, Node, and a
+**Tether builds, launches, and runs a real terminal with embedded Python, Node, and a
 Linux guest (Blink) on the Simulator** — verified end-to-end by the integrator on
 2026-08-22, after fixing five bugs that made the shipping terminal freeze or silently
 fail (see "Integration verification" below).
@@ -88,7 +88,7 @@ rebuilt by `Frameworks/build-blink.sh`, `Frameworks/build-nodejs-mobile.sh` and
 ```bash
 cd TermX
 xcodegen generate
-xcodebuild -project TermX.xcodeproj -scheme TermX \
+xcodebuild -project Tether.xcodeproj -scheme Tether \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -skipPackagePluginValidation -skipMacroValidation build
 
@@ -96,7 +96,7 @@ SIMCTL_CHILD_TERMX_AUTOWORKSPACE=1 \
 SIMCTL_CHILD_TERMX_AUTOCOMMANDS='python3 -c '"'"'open("py_out.txt","w").write("42\n")"'"'
 node -e '"'"'require("fs").writeFileSync("node_out.txt","4\n")"'"'
 linux /bin/busybox echo hi > linux_out.txt' \
-xcrun simctl launch "iPhone 17 Pro" com.termx.app
+xcrun simctl launch "iPhone 17 Pro" com.tether.app
 ```
 
 Physical-device checklist: [`TermX/docs/DEVICE-PASS.md`](TermX/docs/DEVICE-PASS.md).

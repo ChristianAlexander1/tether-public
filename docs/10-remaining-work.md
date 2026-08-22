@@ -43,7 +43,7 @@ self-contained task; T1 is the highest value because it unblocks Claude Code.
 
 1. **You need a Mac with Xcode 16+.** Agents without it produced code that could not
    compile for iOS. Build and run before delivering:
-   `xcodegen generate && xcodebuild -project TermX.xcodeproj -scheme TermX -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -skipPackagePluginValidation -skipMacroValidation build`
+   `xcodegen generate && xcodebuild -project Tether.xcodeproj -scheme Tether -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -skipPackagePluginValidation -skipMacroValidation build`
 2. **iOS has no `Process`, no `fork`/`exec`, no `system()`, no `tar` binary.** Anything
    host-only goes behind `#if os(macOS)`. (This broke the Node and Linux packages; the
    Alpine rootfs now uses the in-process `TarGzExtractor`.)
@@ -183,8 +183,8 @@ DEBUG builds accept two environment hooks, compiled out of release:
 SIMCTL_CHILD_TERMX_AUTOWORKSPACE=1 \        # skip the picker, use the sandbox Documents dir
 SIMCTL_CHILD_TERMX_AUTOCOMMANDS='echo hi > a.txt
 ls | wc -l > count.txt' \                   # newline-separated commands typed into the shell
-xcrun simctl launch "iPhone 17 Pro" com.termx.app
-# verify: $(xcrun simctl get_app_container "iPhone 17 Pro" com.termx.app data)/Documents
+xcrun simctl launch "iPhone 17 Pro" com.tether.app
+# verify: $(xcrun simctl get_app_container "iPhone 17 Pro" com.tether.app data)/Documents
 ```
 
 Run the whole suite before delivering:
@@ -192,6 +192,6 @@ Run the whole suite before delivering:
 ```bash
 for p in TermXCore TermXFiles TermXNode TermXClaude TermXPython TermXLinux; do
   (cd Packages/$p && swift test); done
-xcodebuild -scheme TermX -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+xcodebuild -scheme Tether -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -skipPackagePluginValidation -skipMacroValidation test
 ```
