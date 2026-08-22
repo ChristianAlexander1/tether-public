@@ -164,3 +164,75 @@ npm init -y && npm install express
 - Native `git` (libgit2) is not built yet; it is on the roadmap.
 - Guest programs are x86-64 interpreted; native commands, Python and Node run at full
   speed.
+
+---
+
+## 7. Frequently asked questions
+
+### Why are Python and Node built into the app instead of downloaded on demand?
+
+Because Apple requires it. App Store rule 2.5.2 forbids an app from downloading and
+executing **native compiled code**. Python and Node are native ARM64 binaries, so they must
+ship inside the signed app bundle — an app that downloaded them at runtime would be
+rejected, and iOS would refuse to load them anyway.
+
+What *may* be downloaded at runtime is code that something else interprets, which is
+exactly why the rest works:
+
+- `pip install …` — Python source packages, interpreted by the embedded Python ✅
+- `npm install …` — JavaScript, interpreted by the embedded Node ✅
+- `apk add …` — Alpine x86-64 binaries, **interpreted by Blink**, never run natively ✅
+
+So `git` arrives through `apk` rather than being bundled: it is emulated, not executed.
+
+### How big is the app, and can it be smaller?
+
+The Debug Simulator build is ~211 MB, broken down as Node 110 MB, Python stdlib 56 MB,
+app code 13 MB, Python framework 11 MB, extension frameworks ~12 MB.
+
+A shipping build is much smaller, and two easy wins remain:
+
+| Saving | Why |
+|---|---|
+| ~half of Node's 110 MB | the Simulator build is a fat x86_64 + arm64 binary; a device build carries arm64 only |
+| ~36 MB of the Python stdlib | it currently includes CPython's own `test/` suite, which users never need |
+| more, automatically | Release builds are stripped, and the App Store applies app thinning and compression to the download |
+
+Realistically that lands near ~90 MB installed. Making Python or Node *optional downloads*
+is not possible for the reason above; the achievable path is trimming what ships.
+
+### If I install git in one folder, is it still there in another folder?
+
+Yes. Installed tools are **app-wide, not per-folder**:
+
+- `apk add git` → `$HOME/Documents/linux/` — available in every workspace
+- `pip install …` → `$HOME/python/` — available everywhere
+- `npm install -g …` → `$HOME/node/` — available everywhere
+
+The one exception is a plain `npm install` (no `-g`), which by design creates
+`node_modules` **inside the current project folder**, exactly as it does on a desktop. So
+switching folders never makes you reinstall git; it only changes which project's local
+`node_modules` you see.
+
+### How do I see and reclaim storage?
+
+Two ways.
+
+**In the app:** open the menu in the terminal's toolbar → **Storage**. It lists the Linux
+guest, pip packages, npm packages and caches with their real sizes, gives each a delete
+button with a plain-language warning, and offers *Clear all caches* (which removes only
+cached downloads, never installed packages). The menu also has **Files**, which browses the
+folder the terminal is working in.
+
+**From the terminal:**
+
+```sh
+du -sh $HOME/Documents/linux $HOME/python $HOME/node   # sizes
+linux /sbin/apk info                                   # list Linux packages
+pip list                                               # list Python packages
+npm list -g --depth=0                                  # list global Node packages
+linux /sbin/apk del git                                # uninstall one
+pip uninstall rich
+npm uninstall -g typescript
+rm -rf $HOME/Documents/linux                           # wipe the Linux guest entirely
+```
