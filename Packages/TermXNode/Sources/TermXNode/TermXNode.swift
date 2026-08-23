@@ -43,11 +43,13 @@ public struct SpawnResult: Sendable {
 }
 
 public final class RegistrySpawnExecutor: SpawnExecuting {
+    /// One shared engine for all Node spawn IPC — avoids registering every builtin twice at launch.
+    private static let sharedEngine = TermXCommandEngine()
     private let engine: TermXCommandEngine
     private var nextPID: Int32 = 9000
 
-    public init(engine: TermXCommandEngine = TermXCommandEngine()) {
-        self.engine = engine
+    public init(engine: TermXCommandEngine? = nil) {
+        self.engine = engine ?? Self.sharedEngine
     }
 
     public func spawnSync(file: String, args: [String], cwd: String, env: [String: String],
@@ -231,6 +233,16 @@ public enum NodeEnvironment {
         env["TERM"] = env["TERM"] ?? "xterm-256color"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
         env["PWD"] = cwd
+        // Embedded terminal defaults: skip interactive noise that adds latency
+        // without changing install correctness. Callers can still override.
+        env["npm_config_update_notifier"] = env["npm_config_update_notifier"] ?? "false"
+        env["npm_config_fund"] = env["npm_config_fund"] ?? "false"
+        env["npm_config_audit"] = env["npm_config_audit"] ?? "false"
+        env["npm_config_progress"] = env["npm_config_progress"] ?? "false"
+        env["npm_config_fetch_retries"] = env["npm_config_fetch_retries"] ?? "2"
+        env["npm_config_fetch_retry_mintimeout"] = env["npm_config_fetch_retry_mintimeout"] ?? "5000"
+        env["npm_config_fetch_retry_maxtimeout"] = env["npm_config_fetch_retry_maxtimeout"] ?? "20000"
+        env["npm_config_maxsockets"] = env["npm_config_maxsockets"] ?? "8"
         return env
     }
 }

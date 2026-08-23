@@ -92,7 +92,32 @@ function runNodeSync(nodeArgv, options) {
     exit: process.exit,
     exitCode: process.exitCode,
     env: process.env,
+    stdoutWrite: process.stdout.write,
+    stderrWrite: process.stderr.write,
   };
+
+  const outChunks = [];
+  const errChunks = [];
+  function captureWrite(chunks) {
+    return function capturedWrite(chunk, encoding, cb) {
+      if (chunk != null && chunk !== undefined) {
+        if (Buffer.isBuffer(chunk)) {
+          chunks.push(chunk);
+        } else {
+          const enc = typeof encoding === 'string' ? encoding : 'utf8';
+          chunks.push(Buffer.from(String(chunk), enc));
+        }
+      }
+      if (typeof encoding === 'function') encoding();
+      else if (typeof cb === 'function') cb();
+      return true;
+    };
+  }
+  // spawnSync defaults to pipe stdio — capture nested writes instead of
+  // leaking them onto the parent job's stdout (which also left stdout empty
+  // in the returned result).
+  process.stdout.write = captureWrite(outChunks);
+  process.stderr.write = captureWrite(errChunks);
 
   let status = 0;
   const NestedExit = function NestedExit(code) {
@@ -167,6 +192,8 @@ function runNodeSync(nodeArgv, options) {
     process.exit = prev.exit;
     process.argv = prev.argv;
     process.exitCode = prev.exitCode;
+    process.stdout.write = prev.stdoutWrite;
+    process.stderr.write = prev.stderrWrite;
     try {
       process.chdir(prev.cwd);
     } catch (_) {
@@ -183,7 +210,21 @@ function runNodeSync(nodeArgv, options) {
     }
   }
 
-  return emptyResult(status, options.encoding);
+  const enc = options.encoding;
+  const encName = enc === undefined || enc === null || enc === 'buffer' ? null : enc;
+  const outBuf = Buffer.concat(outChunks);
+  const errBuf = Buffer.concat(errChunks);
+  const stdout = encName === null ? outBuf : outBuf.toString(encName);
+  const stderr = encName === null ? errBuf : errBuf.toString(encName);
+  return {
+    pid: process.pid,
+    output: [null, stdout, stderr],
+    stdout,
+    stderr,
+    status,
+    signal: null,
+    error: null,
+  };
 }
 
 module.exports = {

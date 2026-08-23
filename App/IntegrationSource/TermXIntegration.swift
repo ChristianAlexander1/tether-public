@@ -5,33 +5,48 @@ import TermXNode
 import TermXClaude
 import TermXLinux
 
+/// Wires TermXCore's shell to Python, Node, Claude, and Linux runtimes.
+///
+/// Runtimes are **lazy**: nothing beyond path probes runs until the user actually
+/// invokes `python3`, `node`, `linux`, etc. That keeps app launch light.
 public final class TermXIntegration {
-    public let core: TermXCommandEngine
-    public let python: EmbeddedPythonService
-    public let node: EmbeddedNodeService
-    public let linux: BlinkLinuxService
-    public let claude: ClaudeCodeService
+    private var _python: EmbeddedPythonService?
+    private var _node: EmbeddedNodeService?
+    private var _linux: BlinkLinuxService?
+    private var _claude: ClaudeCodeService?
 
-    public init() {
-        core = TermXCommandEngine()
-        python = EmbeddedPythonService()
-        node = EmbeddedNodeService()
-        linux = BlinkLinuxService()
-        claude = ClaudeCodeService(node: NodeAdapter(service: node))
-        core.registry.registerFallback { [weak linux] request in
-            guard let linux else { return 127 }
-            return linux.runSync(request: request, write: { msg in
-                if request.stderrFD >= 0 {
-                    msg.utf8CString.withUnsafeBufferPointer { _ = write(request.stderrFD, $0.baseAddress!, $0.count - 1) }
-                }
-            })
-        }
+    public init() {}
+
+    public var python: EmbeddedPythonService {
+        if let existing = _python { return existing }
+        let service = EmbeddedPythonService()
+        _python = service
+        return service
+    }
+
+    public var node: EmbeddedNodeService {
+        if let existing = _node { return existing }
+        let service = EmbeddedNodeService()
+        _node = service
+        return service
+    }
+
+    public var linux: BlinkLinuxService {
+        if let existing = _linux { return existing }
+        let service = BlinkLinuxService()
+        _linux = service
+        return service
+    }
+
+    public var claude: ClaudeCodeService {
+        if let existing = _claude { return existing }
+        let service = ClaudeCodeService(node: NodeAdapter(service: node))
+        _claude = service
+        return service
     }
 
     // MARK: - Terminal engine wiring (09-integration-contracts.md §2.2)
 
-    /// The engine the app hands to TermXUI: TermXCore's interactive shell with the
-    /// Python, Node, Claude, and Linux runtime commands registered into every session.
     public func makeShellEngine() -> TermXShellEngine {
         let engine = TermXShellEngine()
         engine.sessionConfigurator = { [weak self] session in
@@ -90,9 +105,6 @@ public final class TermXIntegration {
                 if argv.count > 1, argv[1] == "login" {
                     return await self.claude.login(cwd: state.cwd, env: state.environ, fds: (i, o, e))
                 }
-                // With any CLI args (`--version`, a prompt, …) run the real
-                // installed package through Node — same as typing it on a Mac.
-                // Bare `claude` keeps the first-run install + interactive TUI.
                 if argv.count > 1 {
                     return await self.node.run(
                         argv: argv, cwd: state.cwd, env: state.environ,
@@ -116,9 +128,6 @@ public final class TermXIntegration {
             return self.linux.runSync(argv: guestArgv, cwd: state.cwd, stdinFD: i, stdoutFD: o, stderrFD: e, interactive: true)
         }
 
-        // Unknown command? Try the Linux guest, so anything installed with `apk add`
-        // (git, curl, vim …) runs by bare name. Each shell session owns its own
-        // registry, so the fallback has to be attached here as well as on the engine.
         session.registry.registerFallback { [weak self] request in
             guard let self else { return 127 }
             return self.linux.runSync(request: request, write: { message in

@@ -52,4 +52,23 @@ final class NodeCommandResolverTests: XCTestCase {
         let r = NodeCommandResolver.resolve(argv: ["claude"], home: home) { _ in false }
         XCTAssertEqual(r, .notFound("claude"))
     }
+
+    func testNativeExeBinPrefersSiblingCliJs() throws {
+        let fm = FileManager.default
+        let root = NSTemporaryDirectory() + "resolver-exe-\(UUID().uuidString)"
+        defer { try? fm.removeItem(atPath: root) }
+        let pkg = root + "/node/lib/node_modules/@scope/tool"
+        try fm.createDirectory(atPath: pkg + "/bin", withIntermediateDirectories: true)
+        try fm.createDirectory(atPath: root + "/node/bin", withIntermediateDirectories: true)
+        try Data([0x00, 0x01]).write(to: URL(fileURLWithPath: pkg + "/bin/claude.exe"))
+        try "#!/usr/bin/env node\n".write(toFile: pkg + "/cli.js", atomically: true, encoding: .utf8)
+        try fm.createSymbolicLink(atPath: root + "/node/bin/claude",
+                                  withDestinationPath: "../lib/node_modules/@scope/tool/bin/claude.exe")
+
+        let r = NodeCommandResolver.resolve(argv: ["claude", "--version"], home: root)
+        guard case .run(let argv) = r else { return XCTFail("expected .run, got \(r)") }
+        XCTAssertEqual(argv[0], "node")
+        XCTAssertTrue(argv[1].hasSuffix("/cli.js"), argv[1])
+        XCTAssertEqual(argv[2], "--version")
+    }
 }

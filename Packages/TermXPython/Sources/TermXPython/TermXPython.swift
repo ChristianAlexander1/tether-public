@@ -136,6 +136,8 @@ public enum TermXPythonResources {
 public final class EmbeddedPythonService: PythonRuntime {
     private let queue = DispatchQueue(label: "com.termx.python.jobs", qos: .userInitiated)
     private var interrupted = false
+    /// Prevents `bootstrapPipIfNeeded` → `run(python3 -m pip)` → bootstrap recursion.
+    private var isBootstrappingPip = false
     private let lock = NSLock()
     private var configuredRoot: String?
     /// Path of the CPython standard library this service resolved, or nil when no
@@ -229,7 +231,15 @@ public final class EmbeddedPythonService: PythonRuntime {
         }
 
         let merged = PythonEnvironment.merge(base: environment, cwd: cwd)
-        if argv.first == "pip" || argv.first == "pip3" {
+        // Integration rewrites `pip` → `python3 -m pip`, so detect both forms.
+        // Skip while bootstrapping to avoid recursive run→bootstrap→run.
+        let isPip = argv.first == "pip" || argv.first == "pip3"
+            || (argv.count >= 3 && argv[1] == "-m" && argv[2] == "pip"
+                && (argv[0] == "python3" || argv[0] == "python"
+                    || (argv[0] as NSString).lastPathComponent.hasPrefix("python")))
+        if isPip && !isBootstrappingPip {
+            isBootstrappingPip = true
+            defer { isBootstrappingPip = false }
             try? await bootstrapPipIfNeeded(home: merged["HOME"] ?? PythonEnvironment.defaultHome())
         }
 

@@ -2,23 +2,12 @@
 /**
  * Persistent Node service bootstrap for nodejs-mobile (single engine instance).
  * Swift posts JSON job lines on TERMX_JOB_FD; replies with exit code on TERMX_JOB_REPLY_FD.
- * Requires the delivered @termx/shim (lib/child_process.js uses TERMX_IPC_SOCKET per job).
  *
- * Two rules keep the app alive (docs/PROJECT-CONTEXT.md "hard-won rules"):
- *  - The engine shares the app's process. A real process.exit() (npm calls it
- *    on every run) would kill the whole app, so exit is trapped and turned
- *    into the job's exit code.
- *  - A script job is finished when the script says so — process.exit(), or
- *    the event loop draining ('beforeExit') — NOT when runMain() returns;
- *    npm and most CLIs do all their work asynchronously. For 'beforeExit' to
- *    fire, the job intake must not hold the loop open, so it polls a
- *    non-blocking fd on a timer that is unref'd while a script runs.
+ * Job boundaries are enforced by lib/job_lifecycle.js — each command gets clean stdin
+ * and mandatory teardown so npm leftovers cannot leak into the next job.
  */
 require('./index.js');
 
-// Re-assert the title shim after engine startup. `--require` already ran
-// index.js, but some Node builds reinstall the native process.title accessor
-// during bootstrap; without this, `npm` dies inside uv_set_process_title.
 (function reassertProcessTitle() {
   let title = 'node';
   try { title = String(process.title || 'node'); } catch (_) { /* ignore */ }
@@ -35,6 +24,7 @@ require('./index.js');
 
 const fs = require('fs');
 const ipc = require('./lib/ipc');
+const lifecycle = require('./lib/job_lifecycle');
 
 const jobFD = Number(process.env.TERMX_JOB_FD ?? -1);
 const jobReplyFD = Number(process.env.TERMX_JOB_REPLY_FD ?? -1);
@@ -42,8 +32,6 @@ const jobReplyFD = Number(process.env.TERMX_JOB_REPLY_FD ?? -1);
 function writeReply(obj) {
   fs.writeSync(jobReplyFD, JSON.stringify(obj) + '\n');
 }
-
-// ---- exit trapping (permanent) ------------------------------------------
 
 class TermxExit extends Error {
   constructor(code) {
@@ -53,22 +41,23 @@ class TermxExit extends Error {
 }
 
 process.reallyExit = function trappedReallyExit(code) {
-  // Last line of defense: nothing in the embedded engine may kill the app.
   finishScript(Number(code ?? 0) | 0);
 };
 process.exit = function trappedExit(code) {
   throw new TermxExit(code);
 };
 
-// The active script job's completion callback (null when no script running).
 let scriptFinish = null;
+/** Set after intake socket is created — passed to lifecycle teardown. */
+let intakeSocket = null;
 
 function finishScript(code) {
-  if (scriptFinish) {
-    const f = scriptFinish;
-    scriptFinish = null;
-    f(code);
-  }
+  if (!scriptFinish) return;
+  const f = scriptFinish;
+  scriptFinish = null;
+  lifecycle.silenceEventLoopStorm();
+  try { ipc.clearTransport(); } catch (_) { /* ignore */ }
+  f(code);
 }
 
 process.on('uncaughtException', (err) => {
@@ -91,14 +80,13 @@ process.on('unhandledRejection', (reason) => {
   finishScript(1);
 });
 
-// ---- job runner -----------------------------------------------------------
-
 async function runJob(job, onDone) {
   const prevCwd = process.cwd();
   let replied = false;
   const reply = (obj) => {
     if (replied) return;
     replied = true;
+    lifecycle.finishJob(intakeSocket, ipc);
     try { process.chdir(prevCwd); } catch (_) { /* ignore */ }
     writeReply(obj);
     onDone();
@@ -110,6 +98,8 @@ async function runJob(job, onDone) {
       for (const [k, v] of Object.entries(job.env)) process.env[k] = v;
     }
     process.env.TERMX_INTERACTIVE = job.interactive ? '1' : '0';
+
+    lifecycle.bindStdinFromJob(job);
 
     if (process.env.TERMX_IPC_SOCKET) {
       await ipc.connect();
@@ -145,13 +135,28 @@ async function runJob(job, onDone) {
 
     if (job.kind === 'print' || job.kind === 'eval') {
       const source = job.source ?? '';
+      const path = require('path');
+      const Module = require('module');
+      const evalFilename = path.join(process.cwd(), '[eval]');
+      const evalModule = new Module(evalFilename);
+      evalModule.filename = evalFilename;
+      evalModule.paths = Module._nodeModulePaths(process.cwd());
+      const requireFromCwd = evalModule.require.bind(evalModule);
+
+      process.exitCode = 0;
+      scriptFinish = (code) => {
+        process.removeListener('beforeExit', onBeforeExit);
+        reply({ exitCode: Number(code ?? 0) | 0 });
+      };
+      const onBeforeExit = () => finishScript(process.exitCode ?? 0);
+      process.on('beforeExit', onBeforeExit);
+
       // eslint-disable-next-line no-eval
-      const value = eval(source);
-      if (job.kind === 'print') {
+      const value = (function (require) { return eval(source); })(requireFromCwd);
+      if (job.kind === 'print' && value !== undefined) {
         const text = typeof value === 'string' ? value : require('util').inspect(value);
         process.stdout.write(text + '\n');
       }
-      reply({ exitCode: 0 });
       return;
     }
 
@@ -161,7 +166,6 @@ async function runJob(job, onDone) {
       return;
     }
 
-    // ---- script: run to *completion*, not just through runMain() ----------
     const argv = Array.isArray(job.argv) ? job.argv.slice() : [];
     process.argv = argv;
     process.exitCode = 0;
@@ -173,11 +177,6 @@ async function runJob(job, onDone) {
     const onBeforeExit = () => finishScript(process.exitCode ?? 0);
     process.on('beforeExit', onBeforeExit);
 
-    // `Module.runMain()` is Node's one-shot process bootstrap path. The
-    // embedded engine has already used it for this service bootstrap, so load
-    // a command as a module instead of trying to start a second main program.
-    // This is also the right relative-path behavior for `node script.js`:
-    // resolve it from the job cwd, not as a package name.
     const entry = argv[1];
     if (!entry) {
       throw new Error('node: script path is missing');
@@ -185,21 +184,18 @@ async function runJob(job, onDone) {
     const path = require('path');
     const resolvedEntry = path.isAbsolute(entry) ? entry : path.resolve(process.cwd(), entry);
     if (resolvedEntry.endsWith('.mjs')) {
-      // Dynamic import preserves ESM support. Its completion is accounted for
-      // by the job's beforeExit handler, exactly like an async CommonJS CLI.
       await import(require('url').pathToFileURL(resolvedEntry).href);
     } else {
-      // A CLI must execute for every terminal invocation; normal require()
-      // caching would make a second `node script.js` silently do nothing.
       delete require.cache[require.resolve(resolvedEntry)];
       require(resolvedEntry);
     }
-    // No reply here: the script finishes via process.exit (trapped), an
-    // uncaught error, or the event loop draining (beforeExit).
   } catch (err) {
     if (err instanceof TermxExit) {
-      scriptFinish = null;
-      reply({ exitCode: err.termxExitCode });
+      if (scriptFinish) {
+        finishScript(err.termxExitCode);
+      } else {
+        reply({ exitCode: err.termxExitCode });
+      }
       return;
     }
     scriptFinish = null;
@@ -209,15 +205,10 @@ async function runJob(job, onDone) {
   }
 }
 
-// ---- job intake -----------------------------------------------------------
-// The job fd is wrapped in a real libuv handle (net.Socket works for pipes —
-// the same wrapping Node uses for piped stdin), so it can be ref'd while idle
-// (keeping the engine alive between jobs) and unref'd while a script runs so
-// the script's own handles decide when 'beforeExit' fires.
-
 if (jobFD >= 0 && jobReplyFD >= 0) {
   const net = require('net');
   const intake = new net.Socket({ fd: jobFD, readable: true, writable: false });
+  intakeSocket = intake;
 
   let partial = '';
   let running = false;
@@ -231,12 +222,12 @@ if (jobFD >= 0 && jobReplyFD >= 0) {
     runJob(job, () => {
       running = false;
       intake.ref();
-      startNext();
+      setTimeout(() => startNext(), 0);
     }).catch((jobErr) => {
       running = false;
       intake.ref();
       writeReply({ exitCode: 1, error: String(jobErr) });
-      startNext();
+      setTimeout(() => startNext(), 0);
     });
   }
 

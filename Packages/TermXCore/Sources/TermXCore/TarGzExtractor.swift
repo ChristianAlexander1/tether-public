@@ -18,8 +18,18 @@ public enum TarGzExtractor {
     }
 
     public static func extract(archive: URL, into destination: URL) throws {
-        let tarData = try gunzip(try Data(contentsOf: archive))
-        try untar(tarData, into: destination)
+        try extract(archive: archive, into: destination, shouldExtract: { _ in true })
+    }
+
+    /// - Parameter shouldExtract: return `false` to skip a member (e.g. docs/man).
+    ///   Directories still need their children filtered individually.
+    public static func extract(
+        archive: URL,
+        into destination: URL,
+        shouldExtract: (String) -> Bool
+    ) throws {
+        let tarData = try gunzip(try Data(contentsOf: archive, options: .mappedIfSafe))
+        try untar(tarData, into: destination, shouldExtract: shouldExtract)
     }
 
     // MARK: gzip
@@ -31,7 +41,7 @@ public enum TarGzExtractor {
         guard status == Z_OK else { throw ExtractError.gunzipFailed("inflateInit2 status \(status)") }
         defer { inflateEnd(&stream) }
 
-        var output = Data(capacity: input.count * 4)
+        var output = Data(capacity: max(input.count * 4, 1 << 20))
         let chunkSize = 1 << 18
         var outChunk = [UInt8](repeating: 0, count: chunkSize)
 
@@ -56,68 +66,87 @@ public enum TarGzExtractor {
 
     // MARK: tar
 
-    private static func untar(_ data: Data, into destination: URL) throws {
+    private static func untar(
+        _ data: Data,
+        into destination: URL,
+        shouldExtract: (String) -> Bool
+    ) throws {
         let fm = FileManager.default
         let destRoot = destination.standardizedFileURL
-        var offset = 0
         var pendingLongName: String?
 
-        while offset + 512 <= data.count {
-            let header = data.subdata(in: offset..<offset + 512)
-            offset += 512
-            if header.allSatisfy({ $0 == 0 }) { continue }  // end-of-archive blocks
+        try data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+            let count = raw.count
+            var offset = 0
 
-            func field(_ range: Range<Int>) -> String {
-                let raw = header.subdata(in: range)
-                let terminated = raw.prefix { $0 != 0 }
-                return String(decoding: terminated, as: UTF8.self)
-            }
-            func octal(_ range: Range<Int>) -> Int {
-                Int(field(range).trimmingCharacters(in: CharacterSet(charactersIn: " \0")), radix: 8) ?? 0
-            }
+            while offset + 512 <= count {
+                let header = base + offset
+                offset += 512
 
-            var name = field(0..<100)
-            let mode = octal(100..<108)
-            let size = octal(124..<136)
-            let typeFlag = Character(UnicodeScalar(header[header.startIndex + 156]))
-            let linkName = field(157..<257)
-            let prefix = field(345..<500)
-            if !prefix.isEmpty { name = prefix + "/" + name }
-            if let long = pendingLongName { name = long; pendingLongName = nil }
+                // End-of-archive: two zero blocks. Cheap zero check on name field first.
+                if header[0] == 0 && UnsafeBufferPointer(start: header, count: 512).allSatisfy({ $0 == 0 }) {
+                    continue
+                }
 
-            let payloadLength = (size + 511) & ~511
-            defer { offset += payloadLength }
+                func field(_ start: Int, _ end: Int) -> String {
+                    let len = end - start
+                    var i = 0
+                    while i < len && header[start + i] != 0 { i += 1 }
+                    return String(decoding: UnsafeBufferPointer(start: header + start, count: i), as: UTF8.self)
+                }
+                func octal(_ start: Int, _ end: Int) -> Int {
+                    Int(field(start, end).trimmingCharacters(in: CharacterSet(charactersIn: " \0")), radix: 8) ?? 0
+                }
 
-            if typeFlag == "L" {  // GNU long name: payload holds the real name
-                let payload = data.subdata(in: offset..<offset + size)
-                pendingLongName = String(decoding: payload.prefix { $0 != 0 }, as: UTF8.self)
-                continue
-            }
-            if name.isEmpty || typeFlag == "g" || typeFlag == "x" { continue }  // pax metadata
+                var name = field(0, 100)
+                let mode = octal(100, 108)
+                let size = octal(124, 136)
+                let typeFlag = Character(UnicodeScalar(header[156]))
+                let linkName = field(157, 257)
+                let prefix = field(345, 500)
+                if !prefix.isEmpty { name = prefix + "/" + name }
+                if let long = pendingLongName { name = long; pendingLongName = nil }
 
-            let target = destRoot.appendingPathComponent(name).standardizedFileURL
-            guard target.path.hasPrefix(destRoot.path) else {
-                throw ExtractError.malformedTar("path escape: \(name)")
-            }
+                let payloadLength = (size + 511) & ~511
+                defer { offset += payloadLength }
 
-            switch typeFlag {
-            case "5":
-                try fm.createDirectory(at: target, withIntermediateDirectories: true)
-            case "0", "\0", "7":
-                try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-                let payload = data.subdata(in: offset..<offset + size)
-                try payload.write(to: target)
-                try? fm.setAttributes([.posixPermissions: mode == 0 ? 0o644 : mode], ofItemAtPath: target.path)
-            case "2":
-                try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try? fm.removeItem(at: target)
-                try fm.createSymbolicLink(atPath: target.path, withDestinationPath: linkName)
-            case "1":
-                let source = destRoot.appendingPathComponent(linkName).standardizedFileURL
-                try? fm.removeItem(at: target)
-                try? fm.linkItem(at: source, to: target)
-            default:
-                continue  // char/block/fifo devices: not creatable in sandbox, safely skipped
+                if typeFlag == "L" {  // GNU long name
+                    let payload = UnsafeBufferPointer(start: base + offset, count: size)
+                    let end = payload.firstIndex(of: 0) ?? size
+                    pendingLongName = String(decoding: payload.prefix(end), as: UTF8.self)
+                    continue
+                }
+                if name.isEmpty || typeFlag == "g" || typeFlag == "x" { continue }
+
+                if !shouldExtract(name) { continue }
+
+                let target = destRoot.appendingPathComponent(name).standardizedFileURL
+                guard target.path.hasPrefix(destRoot.path) else {
+                    throw ExtractError.malformedTar("path escape: \(name)")
+                }
+
+                switch typeFlag {
+                case "5":
+                    try fm.createDirectory(at: target, withIntermediateDirectories: true)
+                case "0", "\0", "7":
+                    try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    // Non-atomic: atomic write doubles I/O across thousands of
+                    // small files and was a major bootstrap-time cost on iOS.
+                    let payload = Data(bytes: base + offset, count: size)
+                    try payload.write(to: target, options: [])
+                    try? fm.setAttributes([.posixPermissions: mode == 0 ? 0o644 : mode], ofItemAtPath: target.path)
+                case "2":
+                    try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try? fm.removeItem(at: target)
+                    try fm.createSymbolicLink(atPath: target.path, withDestinationPath: linkName)
+                case "1":
+                    let source = destRoot.appendingPathComponent(linkName).standardizedFileURL
+                    try? fm.removeItem(at: target)
+                    try? fm.linkItem(at: source, to: target)
+                default:
+                    continue
+                }
             }
         }
     }

@@ -22,6 +22,7 @@ final class TerminalOutputPump {
         guard displayLink == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(tick))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 60)
+        link.isPaused = true
         link.add(to: .main, forMode: .common)
         displayLink = link
     }
@@ -37,6 +38,11 @@ final class TerminalOutputPump {
         lock.lock()
         pending.append(data)
         lock.unlock()
+        resumeDisplayLink()
+    }
+
+    private func resumeDisplayLink() {
+        displayLink?.isPaused = false
     }
 
     func flush() {
@@ -48,7 +54,10 @@ final class TerminalOutputPump {
     @objc private func tick() {
         let start = CFAbsoluteTimeGetCurrent()
         let chunk = drainPending(limit: maxFrameBytes)
-        guard !chunk.isEmpty, let view = terminalView else { return }
+        guard !chunk.isEmpty, let view = terminalView else {
+            displayLink?.isPaused = true
+            return
+        }
         view.feed(byteArray: ArraySlice(chunk))
         framesRendered += 1
         lastFrameDuration = CFAbsoluteTimeGetCurrent() - start

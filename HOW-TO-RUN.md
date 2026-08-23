@@ -119,14 +119,19 @@ DEBUG builds accept two env hooks, so you can run a batch and check the results:
 
 ```bash
 D=$(xcrun simctl get_app_container "iPhone 17 Pro" com.tether.app data)/Documents
-SIMCTL_CHILD_TERMX_AUTOWORKSPACE=1 \
-SIMCTL_CHILD_TERMX_AUTOCOMMANDS='python3 -c "print(6*7)" > py.txt
+# Prefer a harness file for longer batches (avoids SIMCTL_CHILD env size limits).
+cat > "$D/.termx-harness.sh" <<'EOF'
+python3 -c "print(6*7)" > py.txt
 node -e "console.log(2+2)" > node.txt
-linux /usr/bin/git --version > git.txt 2>&1' \
+npm --version > npm.txt 2>&1
+EOF
+SIMCTL_CHILD_TERMX_AUTOWORKSPACE=1 \
+SIMCTL_CHILD_TERMX_AUTOCOMMAND_FILE="$D/.termx-harness.sh" \
 xcrun simctl launch "iPhone 17 Pro" com.tether.app
-sleep 20 && cat "$D"/py.txt "$D"/node.txt "$D"/git.txt
+sleep 20 && cat "$D"/py.txt "$D"/node.txt "$D"/npm.txt
 ```
 
+Short one-liners still work via `SIMCTL_CHILD_TERMX_AUTOCOMMANDS='…'`.
 ## Run the test suites
 
 ```bash

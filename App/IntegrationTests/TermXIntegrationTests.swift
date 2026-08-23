@@ -7,7 +7,6 @@ import TermXLinux
 final class TermXIntegrationTests: XCTestCase {
     func testCompositionCreatesAllRuntimeServices() {
         let integration = TermXIntegration()
-        XCTAssertNotNil(integration.core)
         XCTAssertEqual(integration.python.registryEntry["name"], "python3")
         XCTAssertEqual(integration.node.registryEntry["name"], "node")
         XCTAssertEqual(integration.linux.registryEntry["name"], "linux")

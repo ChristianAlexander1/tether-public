@@ -89,8 +89,8 @@ transcripts and memory under `~/.claude/projects/<path-with-dashes>/`. When the 
 from `~/Projects/terminal` to `~/Projects/tether`, the session data was copied across:
 
 ```
-~/.claude/projects/-Users-dev-Projects-terminal/   # old
-~/.claude/projects/-Users-dev-Projects-tether/     # new (copy of the above)
+~/.claude/projects/-Users-<you>-Projects-terminal/   # old
+~/.claude/projects/-Users-<you>-Projects-tether/     # new (copy of the above)
 ```
 
 So a session started in the new folder sees the same memory and can `--resume` the old
@@ -98,8 +98,8 @@ conversations. If you ever move the repo again, copy the matching project folder
 way, and re-sync after quitting Claude so the final part of the transcript is included:
 
 ```bash
-rsync -a ~/.claude/projects/-Users-dev-Projects-OLD/ \
-         ~/.claude/projects/-Users-dev-Projects-NEW/
+rsync -a ~/.claude/projects/-Users-<you>-Projects-OLD/ \
+         ~/.claude/projects/-Users-<you>-Projects-NEW/
 ```
 
 The old empty `~/Projects/terminal` folder can be deleted once no session is running in it.

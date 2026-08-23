@@ -252,17 +252,31 @@ struct WorkspaceView: View {
         try? newSession.start()
         #if DEBUG
         // Simulator harness: TERMX_AUTOCOMMANDS holds newline-separated
-        // commands. Join with `;` and send once so the shell runs them
-        // in order to completion.
-        if let script = ProcessInfo.processInfo.environment["TERMX_AUTOCOMMANDS"], !script.isEmpty {
-            let joined = script
+        // commands, or TERMX_AUTOCOMMAND_FILE points at a script in the
+        // workspace. Join with `;` and send once so the shell runs them
+        // in order to completion. A file avoids SIMCTL_CHILD env size /
+        // newline limits for longer acceptance batches.
+        let script: String? = {
+            if let path = ProcessInfo.processInfo.environment["TERMX_AUTOCOMMAND_FILE"],
+               !path.isEmpty,
+               let fromFile = try? String(contentsOfFile: path, encoding: .utf8) {
+                return fromFile
+            }
+            return ProcessInfo.processInfo.environment["TERMX_AUTOCOMMANDS"]
+        }()
+        if let script, !script.isEmpty {
+            // Send one command per line (not `;`-joined). The interactive shell
+            // evals each newline-terminated line to completion before the next,
+            // so if/while/pipelines in a harness file work and long batches do
+            // not collapse into one unparseable mega-command.
+            let lines = script
                 .split(separator: "\n", omittingEmptySubsequences: true)
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty && !$0.hasPrefix("#") }
-                .joined(separator: " ; ")
+            let payload = lines.joined(separator: "\n") + "\n"
             Task.detached {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-                newSession.send(joined + "\n")
+                newSession.send(payload)
             }
         }
         #endif

@@ -77,6 +77,28 @@ const Module = require('module');
   }
 })();
 
+// Keep-alive sockets hold the event loop open after short CLIs (npm --version)
+// finish, so the next job never starts cleanly. Disable keep-alive on the
+// legacy Agents. Do not replace undici's global dispatcher — a custom Agent
+// with tiny keepAlive timeouts caused CheckImmediate spin loops on the
+// following npm install in this persistent engine.
+(function disableHttpKeepAlive() {
+  try {
+    const http = require('http');
+    const https = require('https');
+    if (http.globalAgent) {
+      http.globalAgent.keepAlive = false;
+      http.globalAgent.maxSockets = 8;
+    }
+    if (https.globalAgent) {
+      https.globalAgent.keepAlive = false;
+      https.globalAgent.maxSockets = 8;
+    }
+  } catch (_) {
+    /* ignore */
+  }
+})();
+
 const overrides = {
   child_process: require('./lib/child_process'),
   os: require('./lib/os'),

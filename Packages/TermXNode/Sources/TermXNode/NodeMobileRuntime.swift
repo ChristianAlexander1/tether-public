@@ -64,9 +64,9 @@ final class NodeMobileRuntime: NodeRuntime {
         request.append(0x0A)
 
         return NodeStdioBridge.withRedirectedOutput(stdoutFD: job.stdoutFD, stderrFD: job.stderrFD) {
-            let stdinPump = Self.startStdinPump(from: job.stdinFD)
-            defer { stdinPump?.stop() }
-
+            // Piped stdin is declared on the job payload (`stdinFD`) and read in
+            // bootstrap.js. Do not pump into STDIN_FILENO — that never delivers
+            // EOF and leaked listeners into later jobs.
             let wrote = request.withUnsafeBytes { raw in
                 write(jobWriteFD, raw.baseAddress!, request.count)
             }
@@ -164,6 +164,13 @@ final class NodeMobileRuntime: NodeRuntime {
             "env": env,
             "interactive": job.interactive,
         ]
+        // Pipe stdin is slurped in Swift (NodeStdinSlurp) and sent as base64 so the
+        // engine never relies on libuv polling a borrowed fd after npm.
+        if job.stdinFD >= 0, isatty(job.stdinFD) == 0,
+           let slurped = NodeStdinSlurp.readPipeIfNeeded(fd: job.stdinFD) {
+            payload["stdinData"] = slurped.base64EncodedString()
+        }
+        payload["stdinFD"] = -1
 
         var nodeArgs = job.argv
         let isNode = nodeArgs.first == "node" || (nodeArgs.first?.hasSuffix("/node") ?? false)
@@ -236,61 +243,6 @@ final class NodeMobileRuntime: NodeRuntime {
             Thread.sleep(forTimeInterval: 0.01)
         }
         return nil
-    }
-
-    /// Forwards the job's stdin into the embedded engine for as long as the job runs.
-    ///
-    /// The pump must be stoppable: `DispatchWorkItem.cancel()` cannot interrupt a thread
-    /// already blocked in `read()`, and this fd is the terminal's pty. Left running, a
-    /// finished job's pump keeps swallowing everything the user types afterwards, so the
-    /// loop polls with a timeout and checks a stop flag instead of blocking forever.
-    final class StdinPump {
-        private let fd: Int32
-        private let lock = NSLock()
-        private var stopped = false
-        private let finished = DispatchSemaphore(value: 0)
-
-        init(fd: Int32) {
-            self.fd = fd
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                self?.loop()
-            }
-        }
-
-        private var isStopped: Bool {
-            lock.lock(); defer { lock.unlock() }; return stopped
-        }
-
-        private func loop() {
-            defer { finished.signal() }
-            var buf = [UInt8](repeating: 0, count: 4096)
-            while !isStopped {
-                var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-                let ready = poll(&pfd, 1, 50)
-                if ready < 0 {
-                    if errno == EINTR { continue }
-                    return
-                }
-                if ready == 0 { continue }
-                if pfd.revents & Int16(POLLNVAL) != 0 { return }
-                let n = read(fd, &buf, buf.count)
-                if n < 0 && (errno == EINTR || errno == EAGAIN) { continue }
-                if n <= 0 { return }
-                _ = buf.withUnsafeBytes { raw in
-                    write(STDIN_FILENO, raw.baseAddress!, n)
-                }
-            }
-        }
-
-        func stop() {
-            lock.lock(); stopped = true; lock.unlock()
-            _ = finished.wait(timeout: .now() + 1.0)
-        }
-    }
-
-    private static func startStdinPump(from fd: Int32) -> StdinPump? {
-        guard fd >= 0 else { return nil }
-        return StdinPump(fd: fd)
     }
 
     private func writeStderr(_ job: NodeRunningJob, _ message: String) {

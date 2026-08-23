@@ -258,10 +258,10 @@ public final class TerminalSession: ObservableObject, Identifiable {
                 self.readerLock.unlock()
                 if stopped { return }
 
-                // Poll so the loop can observe the stop flag instead of blocking in
-                // read() forever, which would make closing the pty hang the closer.
+                // Poll so the loop can observe the stop flag. 200 ms keeps idle CPU low
+                // while still feeling responsive once output arrives.
                 var pfd = pollfd(fd: master, events: Int16(POLLIN), revents: 0)
-                let ready = poll(&pfd, 1, 50)
+                let ready = poll(&pfd, 1, 200)
                 if ready < 0 {
                     if errno == EINTR { continue }
                     return
