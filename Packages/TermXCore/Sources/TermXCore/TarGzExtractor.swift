@@ -3,12 +3,13 @@ import zlib
 
 /// In-process .tar.gz extraction for platforms without a tar binary (iOS).
 /// Supports ustar + GNU long-name entries, regular files, directories, sym/hard links.
-enum TarGzExtractor {
-    enum ExtractError: Error, CustomStringConvertible {
+/// Lives in TermXCore so both the Linux lane (rootfs) and Node (npm bootstrap) can use it.
+public enum TarGzExtractor {
+    public enum ExtractError: Error, CustomStringConvertible {
         case gunzipFailed(String)
         case malformedTar(String)
 
-        var description: String {
+        public var description: String {
             switch self {
             case .gunzipFailed(let why): return "gunzip failed: \(why)"
             case .malformedTar(let why): return "malformed tar: \(why)"
@@ -16,7 +17,7 @@ enum TarGzExtractor {
         }
     }
 
-    static func extract(archive: URL, into destination: URL) throws {
+    public static func extract(archive: URL, into destination: URL) throws {
         let tarData = try gunzip(try Data(contentsOf: archive))
         try untar(tarData, into: destination)
     }

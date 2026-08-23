@@ -53,7 +53,7 @@ External `termx-shim`: **48 pass** (`cd TermX/External/termx-shim && npm test`)
 ## Architecture notes
 
 - **Host (macOS tests / dev):** `HostNodeRuntime` spawns system Node with `--import ensure-ipc.mjs --require @termx/shim`; IPC via Unix domain socket (`TERMX_IPC_SOCKET`).
-- **iOS production:** `NodeMobileRuntime` calls `termx_node_launch()` once on a 2 MiB-stack thread with `bootstrap.js` + shim preload. Jobs posted on `TERMX_JOB_FD`; spawn IPC uses `TERMX_IPC_SOCKET` per job.
+- **iOS production:** `NodeMobileRuntime` calls `termx_node_launch()` once on an 8 MiB-stack thread with `bootstrap.js` + shim preload. Jobs posted on `TERMX_JOB_FD`; spawn IPC uses `TERMX_IPC_SOCKET` per job.
 - **`@termx/shim` location:** bundled at `Bundle.module/shim/` → `index.js`, loaded via `NODE_OPTIONS`.
 
 ## Known limitations / integrator follow-ups

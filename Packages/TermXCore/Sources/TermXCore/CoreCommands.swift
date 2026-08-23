@@ -921,7 +921,7 @@ public enum CoreCommands {
         #endif
 
         if printAll {
-            printOut("\(sysname) TermX 1.0.0 iOS \(machine)\n")
+            printOut("\(sysname) Tether 1.0.0 iOS \(machine)\n")
         } else {
             var parts: [String] = []
             if printKernel { parts.append(sysname) }

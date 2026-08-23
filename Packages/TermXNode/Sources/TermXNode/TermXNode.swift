@@ -122,8 +122,39 @@ public final class EmbeddedNodeService: NodeService {
                 self.lock.unlock()
 
                 let mergedEnv = NodeEnvironment.merge(base: env, cwd: cwd)
+                let home = mergedEnv["HOME"] ?? NSHomeDirectory() + "/Documents"
+
+                // npm/npx bootstrap on first use, and bin-name resolution
+                // (`claude` → node <resolved cli.js>). See NpmBootstrap.swift.
+                var resolution = NodeCommandResolver.resolve(argv: argv, home: home)
+                if case .needsNpm = resolution {
+                    do {
+                        try NpmBootstrap.install(home: home) { text in
+                            Self.writeFD(stdoutFD, text)
+                        }
+                        resolution = NodeCommandResolver.resolve(argv: argv, home: home)
+                    } catch {
+                        Self.writeFD(stderrFD, "\(error)\n")
+                        continuation.resume(returning: 1)
+                        return
+                    }
+                }
+                let finalArgv: [String]
+                switch resolution {
+                case .run(let rewritten):
+                    finalArgv = rewritten
+                case .needsNpm(let tool):
+                    Self.writeFD(stderrFD, "\(tool): npm bootstrap did not produce a CLI\n")
+                    continuation.resume(returning: 1)
+                    return
+                case .notFound(let name):
+                    Self.writeFD(stderrFD, "\(name): not installed (try: npm install -g \(name))\n")
+                    continuation.resume(returning: 127)
+                    return
+                }
+
                 let job = NodeRunningJob(
-                    argv: argv, cwd: cwd, env: mergedEnv,
+                    argv: finalArgv, cwd: cwd, env: mergedEnv,
                     stdinFD: stdinFD, stdoutFD: stdoutFD, stderrFD: stderrFD,
                     interactive: interactive
                 )
@@ -146,6 +177,13 @@ public final class EmbeddedNodeService: NodeService {
         lock.unlock()
         job?.cancel()
         runtime.interrupt()
+    }
+
+    private static func writeFD(_ fd: Int32, _ text: String) {
+        guard fd >= 0 else { return }
+        text.withCString { ptr in
+            _ = write(fd, ptr, strlen(ptr))
+        }
     }
 
     public var registryEntries: [[String: String]] {

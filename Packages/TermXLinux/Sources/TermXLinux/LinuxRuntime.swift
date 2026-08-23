@@ -22,23 +22,35 @@ enum LinuxRuntimeFactory {
 }
 
 enum BlinkPaths {
+    /// The repo's Frameworks directory, derived from this file's location so the
+    /// checkout can live anywhere. (Hardcoded absolute paths here broke every
+    /// macOS Linux-lane test when the repo moved from ~/Projects/terminal.)
+    static var frameworksRoot: String {
+        URL(fileURLWithPath: #filePath)   // …/Packages/TermXLinux/Sources/TermXLinux/LinuxRuntime.swift
+            .deletingLastPathComponent()  // TermXLinux
+            .deletingLastPathComponent()  // Sources
+            .deletingLastPathComponent()  // TermXLinux (package)
+            .deletingLastPathComponent()  // Packages
+            .deletingLastPathComponent()  // repo root
+            .appendingPathComponent("Frameworks").path
+    }
+
     static var hostBinary: String {
         if let override = ProcessInfo.processInfo.environment["TERMX_BLINK_BINARY"] {
             return override
         }
         let candidates = [
-            ProcessInfo.processInfo.environment["TERMX_BLINK_BINARY"],
-            "/Users/dev/Projects/terminal/TermX/Frameworks/.build/blink-src/o/rel/blink/blink",
-            "/Users/dev/Projects/terminal/TermX/Frameworks/.build/blink/blink-src/o/rel/blink/blink",
+            frameworksRoot + "/.build/blink/host/blink",
+            frameworksRoot + "/.build/blink-src/o/rel/blink/blink",
             "/usr/local/bin/blink",
             "/opt/homebrew/bin/blink",
-        ].compactMap { $0 }
+        ]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) } ?? candidates[0]
     }
 
     static var xcframeworkRoot: String {
         ProcessInfo.processInfo.environment["TERMX_BLINK_XCFRAMEWORK"]
-            ?? "/Users/dev/Projects/terminal/TermX/Frameworks/Blink.xcframework"
+            ?? frameworksRoot + "/Blink.xcframework"
     }
 }
 

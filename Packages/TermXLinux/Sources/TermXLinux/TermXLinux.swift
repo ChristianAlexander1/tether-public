@@ -105,11 +105,36 @@ public enum LinuxFallback {
         guard !name.contains("/") else { return nil }
         for dir in guestBinDirs {
             let hostPath = rootfs.appendingPathComponent("\(dir)/\(name)").path
-            if FileManager.default.isExecutableFile(atPath: hostPath) {
+            if isGuestExecutable(hostPath, rootfs: rootfs) {
                 return "/\(dir)/\(name)"
             }
         }
         return nil
+    }
+
+    /// Whether the entry is runnable *inside the guest*.
+    ///
+    /// Most of Alpine's userland is busybox applets: `/bin/uname` is a symlink to
+    /// the guest-absolute `/bin/busybox`. FileManager resolves that against the
+    /// **host** root, where it does not exist, so every applet looked missing.
+    /// Re-root absolute link targets at the rootfs before testing them.
+    static func isGuestExecutable(_ hostPath: String, rootfs: URL) -> Bool {
+        let fm = FileManager.default
+        if fm.isExecutableFile(atPath: hostPath) { return true }
+        var current = hostPath
+        for _ in 0..<16 {
+            guard let target = try? fm.destinationOfSymbolicLink(atPath: current) else { return false }
+            if target.hasPrefix("/") {
+                current = rootfs.appendingPathComponent(String(target.dropFirst())).path
+            } else {
+                current = URL(fileURLWithPath: current)
+                    .deletingLastPathComponent()
+                    .appendingPathComponent(target)
+                    .standardizedFileURL.path
+            }
+            if fm.isExecutableFile(atPath: current) { return true }
+        }
+        return false
     }
 
     public static func canRunGuestCommand(name: String, rootfs: URL) -> Bool {
@@ -169,6 +194,23 @@ public final class BlinkLinuxService: LinuxGuestRuntime {
             }
             return 127
         }
+        // The emulator needs an absolute guest path. `linux apk add git` arrives
+        // here as ["apk", ...] and used to fail with no output at all; the
+        // bare-name fallback in runSync(request:) already resolved these, so do
+        // the same for the explicit `linux <cmd>` form. Resolution has to happen
+        // after bootstrap, since it looks for the binary inside the rootfs.
+        var argv = argv
+        if !argv[0].contains("/") {
+            guard let resolved = LinuxFallback.guestCommandPath(name: argv[0], rootfs: rootfs) else {
+                let message = "linux: \(argv[0]): command not found in the Alpine guest\n"
+                if stderrFD >= 0 {
+                    message.utf8CString.withUnsafeBufferPointer { _ = write(stderrFD, $0.baseAddress!, $0.count - 1) }
+                }
+                return 127
+            }
+            argv[0] = resolved
+        }
+
         lock.withLock { interrupted = false }
         return await runtime.run(
             argv: argv, cwd: cwd,

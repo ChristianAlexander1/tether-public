@@ -18,6 +18,16 @@ static pthread_t g_node_thread;
 static termx_node_launch_args_t g_launch_args;
 static volatile int g_node_thread_running = 0;
 
+/*
+ * Node's default embedding entry point does substantial C++ and JavaScript
+ * module loading on its initial thread.  A 2 MiB pthread stack was sufficient
+ * for small `node -e` probes, but npm's module graph exhausted it and surfaced
+ * later as an invalid V8 access while tiering.  Eight MiB is the stack size
+ * Blink uses for its user-mode runtime and leaves adequate headroom for npm
+ * and Claude without changing the app's heap budget.
+ */
+#define TERMX_NODE_STACK_SIZE (8 * 1024 * 1024)
+
 static void *termx_node_thread_entry(void *ctx) {
     termx_node_launch_args_t *args = (termx_node_launch_args_t *)ctx;
     g_node_thread_running = 1;
@@ -45,7 +55,11 @@ int termx_node_launch(int argc, char **argv) {
 
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 2 * 1024 * 1024);
+    const int stack_rc = pthread_attr_setstacksize(&attr, TERMX_NODE_STACK_SIZE);
+    if (stack_rc != 0) {
+        pthread_attr_destroy(&attr);
+        return stack_rc;
+    }
     const int rc = pthread_create(&g_node_thread, &attr, termx_node_thread_entry, &g_launch_args);
     pthread_attr_destroy(&attr);
     if (rc != 0) {

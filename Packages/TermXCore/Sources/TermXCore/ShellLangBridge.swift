@@ -28,6 +28,77 @@ final class ShellSessionHost: ShellHost {
     func setValue(_ value: String, for name: String) {
         session?.state.environ[name] = value
     }
+
+    func withRedirects(_ spec: String, body: () -> Int32) -> Int32 {
+        guard let session else { return body() }
+        return RedirectScope.run(spec: spec, state: session.state, body: body)
+    }
+}
+
+/// Applies a trailing redirect spec from a compound command (`done > f`,
+/// `fi 2>err`) by swapping the session fds, exactly as a simple command's
+/// redirections do in `PipelineExecutor.executeSimple`. Commands executed by
+/// `body` inherit the swapped fds as their defaults.
+enum RedirectScope {
+    static func run(spec: String, state: ShellState, body: () -> Int32) -> Int32 {
+        // Reuse the pipeline parser on a probe command to get the redirections.
+        guard case .simple(let cmd)? = ShellParser.parse("true \(spec)"),
+              !cmd.redirections.isEmpty else {
+            return body()
+        }
+
+        func resolve(_ target: String) -> String {
+            let expanded = VariableExpander.expand(target, environ: state.environ)
+            if expanded.hasPrefix("/") { return expanded }
+            return (state.cwd as NSString).appendingPathComponent(expanded)
+        }
+
+        let savedOut = state.stdoutFD
+        let savedErr = state.stderrFD
+        let savedIn = state.stdinFD
+        var opened: [Int32] = []
+
+        for redir in cmd.redirections {
+            switch redir.kind {
+            case .outputTo:
+                let fd = open(resolve(redir.target), O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+                if fd >= 0 { state.stdoutFD = fd; opened.append(fd) }
+            case .outputAppend:
+                let fd = open(resolve(redir.target), O_WRONLY | O_CREAT | O_APPEND, 0o644)
+                if fd >= 0 { state.stdoutFD = fd; opened.append(fd) }
+            case .inputFrom:
+                let fd = open(resolve(redir.target), O_RDONLY)
+                if fd >= 0 { state.stdinFD = fd; opened.append(fd) }
+            case .stderrTo:
+                let fd = open(resolve(redir.target), O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+                if fd >= 0 { state.stderrFD = fd; opened.append(fd) }
+            case .stderrAppend:
+                let fd = open(resolve(redir.target), O_WRONLY | O_CREAT | O_APPEND, 0o644)
+                if fd >= 0 { state.stderrFD = fd; opened.append(fd) }
+            case .stderrToStdout:
+                state.stderrFD = state.stdoutFD
+            case .hereString(let content):
+                var pipeFDs: [Int32] = [0, 0]
+                if pipe(&pipeFDs) == 0 {
+                    let data = Array((content + "\n").utf8)
+                    _ = data.withUnsafeBufferPointer { buf in
+                        write(pipeFDs[1], buf.baseAddress!, data.count)
+                    }
+                    close(pipeFDs[1])
+                    state.stdinFD = pipeFDs[0]
+                    opened.append(pipeFDs[0])
+                }
+            }
+        }
+
+        let code = body()
+
+        state.stdoutFD = savedOut
+        state.stderrFD = savedErr
+        state.stdinFD = savedIn
+        for fd in opened { close(fd) }
+        return code
+    }
 }
 
 /// Script-level evaluation (if/while/case/functions/here-docs) wired into the shell.

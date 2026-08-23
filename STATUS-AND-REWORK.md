@@ -47,6 +47,19 @@ each now fixed with a regression test:
    Backslash handling now follows the POSIX double-quote rules.
 5. **Every counter loop was a no-op** — variables assigned inside a script were invisible
    to later expansions in the same script, so `while [ $i -lt 3 ]` never entered.
+6. **Redirects on compound commands were silently dropped** (found 2026-08-22) —
+   `while …; done > f`, `for …; done > f`, and `if …; fi > f` never created the file; the
+   trailing `> f` was mis-parsed as a separate command and the output went to the terminal.
+   The script parser now captures trailing redirect words into a `.redirected` node, the
+   evaluator hands the spec to `ShellHost.withRedirects`, and `RedirectScope` (TermXCore)
+   applies it by swapping the session fds exactly as simple-command redirects do.
+   Verified on the Simulator; regression tests in `CompoundRedirectTests` (TermXCore) and
+   `RedirectedCompoundTests` (TermXShellLang).
+
+**Also fixed 2026-08-22:** every `swift test` / app build failed after the repo moved from
+`~/Projects/terminal` to `~/Projects/tether` — the per-package `.build` caches embed
+absolute PCH paths from the old location. **If the repo ever moves again, delete every
+`.build` directory first** (`find . -type d -name .build -maxdepth 3 | xargs rm -rf`).
 
 ## Completed this pass (T1–T8 core)
 

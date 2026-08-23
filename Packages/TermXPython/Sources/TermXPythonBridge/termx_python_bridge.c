@@ -217,7 +217,12 @@ static int configure_search_paths(PyConfig *config, const char *support_root, co
     return 0;
 }
 
-int termx_python_initialize(void) {
+/* Builds the interpreter with our embedded-stdlib layout. When argv is given,
+   the command line is parsed into the config (parse_argv) so a later
+   Py_RunMain() behaves exactly like the python CLI -- handling --version, -c,
+   -m and script paths -- without Py_BytesMain rebuilding the config from
+   scratch and losing these paths. */
+static int initialize_with_argv(int argc, char **argv, int *exit_code) {
     if (g_initialized) {
         return 0;
     }
@@ -233,11 +238,36 @@ int termx_python_initialize(void) {
     config.write_bytecode = 0;
     config.install_signal_handlers = 1;
     config.module_search_paths_set = 1;
+    /* Isolated config leaves this at 0, which leaves sys.stdout/sys.stderr
+       unattached to the C streams. */
+    config.configure_c_stdio = 1;
+    /* CPython defaults this to 1 on iOS, which swaps sys.stdout/sys.stderr for
+       _apple_support.SystemLog writers aimed at the Apple system log. In a
+       terminal we want the real descriptors, otherwise print() vanishes from
+       the session while os.write(1, ...) still works. */
+    config.use_system_logger = 0;
 
     PyStatus status = Py_PreInitialize(&preconfig);
     if (PyStatus_Exception(status)) {
         PyConfig_Clear(&config);
+        if (PyStatus_IsExit(status)) {
+            if (exit_code != NULL) { *exit_code = status.exitcode; }
+            return 1;
+        }
         return -1;
+    }
+
+    if (argc > 0 && argv != NULL) {
+        config.parse_argv = 1;
+        status = PyConfig_SetBytesArgv(&config, (Py_ssize_t)argc, argv);
+        if (PyStatus_Exception(status)) {
+            PyConfig_Clear(&config);
+            if (PyStatus_IsExit(status)) {
+                if (exit_code != NULL) { *exit_code = status.exitcode; }
+                return 1;
+            }
+            return -1;
+        }
     }
 
     /* BeeWare app-bundle layout: $APP/python/lib/python3.14 (+ lib-dynload/.fwork). */
@@ -311,11 +341,20 @@ int termx_python_initialize(void) {
     status = Py_InitializeFromConfig(&config);
     PyConfig_Clear(&config);
     if (PyStatus_Exception(status)) {
+        if (PyStatus_IsExit(status)) {
+            /* --version / --help: Python printed its output and wants to exit. */
+            if (exit_code != NULL) { *exit_code = status.exitcode; }
+            return 1;
+        }
         return -1;
     }
 
     g_initialized = true;
     return 0;
+}
+
+int termx_python_initialize(void) {
+    return initialize_with_argv(0, NULL, NULL) == 0 ? 0 : -1;
 }
 
 int termx_python_is_initialized(void) {
@@ -422,16 +461,34 @@ int termx_python_run(int argc, char **argv, const char *cwd,
     pthread_mutex_lock(&g_run_lock);
     g_interrupt_requested = 0;
 
-    if (!g_initialized) {
-        if (termx_python_initialize() != 0) {
-            pthread_mutex_unlock(&g_run_lock);
-            return 127;
-        }
-    }
-
+    /* Environment first: Py_PreInitialize reads LANG to configure the locale. */
     if (apply_environment(envp, interactive) != 0) {
         pthread_mutex_unlock(&g_run_lock);
         return 1;
+    }
+
+    if (cwd != NULL && cwd[0] != '\0') {
+        if (chdir(cwd) != 0) {
+            pthread_mutex_unlock(&g_run_lock);
+            return 1;
+        }
+    }
+
+    int saved_stdio[3];
+    if (redirect_stdio(stdin_fd, stdout_fd, stderr_fd, saved_stdio) != 0) {
+        pthread_mutex_unlock(&g_run_lock);
+        return 1;
+    }
+
+    int init_exit = 0;
+    int init_state = initialize_with_argv(argc, argv, &init_exit);
+    if (init_state != 0) {
+        /* 1 = Python printed --version/--help and asked to exit; -1 = real failure. */
+        fflush(stdout);
+        fflush(stderr);
+        restore_stdio(saved_stdio);
+        pthread_mutex_unlock(&g_run_lock);
+        return init_state > 0 ? init_exit : 127;
     }
 
     const char *pythonpath = getenv("PYTHONPATH");
@@ -449,26 +506,14 @@ int termx_python_run(int argc, char **argv, const char *cwd,
         }
     }
 
-    if (cwd != NULL && cwd[0] != '\0') {
-        if (chdir(cwd) != 0) {
-            pthread_mutex_unlock(&g_run_lock);
-            return 1;
-        }
-    }
-
-    int saved_stdio[3];
-    if (redirect_stdio(stdin_fd, stdout_fd, stderr_fd, saved_stdio) != 0) {
-        pthread_mutex_unlock(&g_run_lock);
-        return 1;
-    }
-
-    int exit_code = Py_BytesMain(argc, argv);
+    /* Py_RunMain executes what parse_argv put in the config and finalizes the
+       interpreter on the way out -- so no Py_Finalize() here, and the next
+       command re-initializes from scratch. */
+    int exit_code = Py_RunMain();
+    g_initialized = false;
     fflush(stdout);
     fflush(stderr);
     restore_stdio(saved_stdio);
-
-    Py_Finalize();
-    g_initialized = false;
 
     pthread_mutex_unlock(&g_run_lock);
     (void)g_interrupt_requested;

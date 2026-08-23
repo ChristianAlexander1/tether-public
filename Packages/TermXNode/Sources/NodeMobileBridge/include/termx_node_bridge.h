@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-/// Start nodejs-mobile on a dedicated 2 MiB stack thread. `argv` must stay alive until
+/// Start nodejs-mobile on a dedicated 8 MiB stack thread. `argv` must stay alive until
 /// `node_start` returns (typically for the lifetime of the process).
 int termx_node_launch(int argc, char **argv);
 

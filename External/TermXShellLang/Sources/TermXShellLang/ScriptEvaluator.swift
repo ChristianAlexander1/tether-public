@@ -12,6 +12,14 @@ public protocol ShellHost: AnyObject {
     /// Variable storage shared with the surrounding shell.
     func value(for name: String) -> String?
     func setValue(_ value: String, for name: String)
+    /// Applies a redirection spec (e.g. `> out.txt 2>&1`) around `body` — used
+    /// for compound commands (`while …; done > f`). Defaulted so hosts that
+    /// cannot redirect (tests) just run the body.
+    func withRedirects(_ spec: String, body: () -> Int32) -> Int32
+}
+
+public extension ShellHost {
+    func withRedirects(_ spec: String, body: () -> Int32) -> Int32 { body() }
 }
 
 public enum ShellLangError: Error, Equatable {
@@ -186,6 +194,29 @@ public final class ScriptEvaluator {
 
         case .returnFromFunction(let code):
             return .returnFlow(code)
+
+        case .redirected(let inner, let redirects):
+            var expandedWords: [String] = []
+            for w in redirects {
+                expandedWords.append(try expandLine(w, variables: &variables))
+            }
+            let spec = expandedWords.joined(separator: " ")
+            var flow: Flow = .normal(0)
+            var thrown: Error?
+            let code = host.withRedirects(spec) {
+                do {
+                    let f = try self.evalNode(inner, variables: &variables)
+                    flow = f
+                    if case .normal(let c) = f { return c }
+                    return 0
+                } catch {
+                    thrown = error
+                    return 1
+                }
+            }
+            if let thrown { throw thrown }
+            if case .normal = flow { return .normal(code) }
+            return flow
         }
     }
 

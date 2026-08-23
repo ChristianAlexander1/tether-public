@@ -12,6 +12,9 @@ public indirect enum ShellNode {
     case breakLoop(levels: Int)
     case continueLoop(levels: Int)
     case returnFromFunction(code: Int32?)
+    /// A compound command with trailing redirections (`done > f`, `fi 2>err`).
+    /// `redirects` keeps the raw words; the host applies them around the node.
+    case redirected(node: ShellNode, redirects: [String])
 }
 
 // Tuple payloads prevent synthesised conformance, so equality is written out.
@@ -40,6 +43,8 @@ extension ShellNode: Equatable {
             return a == b
         case let (.returnFromFunction(a), .returnFromFunction(b)):
             return a == b
+        case let (.redirected(an, ar), .redirected(bn, br)):
+            return an == bn && ar == br
         default:
             return false
         }
@@ -323,10 +328,10 @@ struct Parser {
         }
         if case .word(let w) = t {
             switch w {
-            case "if": return try parseIf()
-            case "while": return try parseLoop(isUntil: false)
-            case "until": return try parseLoop(isUntil: true)
-            case "case": return try parseCase()
+            case "if": return attachTrailingRedirects(try parseIf())
+            case "while": return attachTrailingRedirects(try parseLoop(isUntil: false))
+            case "until": return attachTrailingRedirects(try parseLoop(isUntil: true))
+            case "case": return attachTrailingRedirects(try parseCase())
             case "function": return try parseFunctionDecl()
             case "break": return try parseBreakContinue(isBreak: true)
             case "continue": return try parseBreakContinue(isBreak: false)
@@ -342,7 +347,7 @@ struct Parser {
                 throw ShellLangError.syntax("missing '}'")
             }
             _ = advance()
-            return .sequence(body)
+            return attachTrailingRedirects(.sequence(body))
         }
         if case .lparen = t {
             _ = advance()
@@ -351,9 +356,45 @@ struct Parser {
                 throw ShellLangError.syntax("missing ')'")
             }
             _ = advance()
-            return .sequence(body)
+            return attachTrailingRedirects(.sequence(body))
         }
         throw ShellLangError.syntax("unexpected token '\(peekDesc())'")
+    }
+
+    /// Collects redirect words trailing a compound command (`done > f 2>&1`).
+    /// The lexer keeps `>`/`<` inside plain words, so a redirect arrives either
+    /// as a self-contained word (`>f`, `2>&1`) or as an operator word (`>`,
+    /// `2>>`) whose target is the next word.
+    private mutating func attachTrailingRedirects(_ node: ShellNode) -> ShellNode {
+        var words: [String] = []
+        while case .word(let w)? = peek(), Self.isRedirectWord(w) {
+            words.append(w)
+            _ = advance()
+            if Self.redirectTargetIsNextWord(w), case .word(let target)? = peek() {
+                words.append(target)
+                _ = advance()
+            }
+        }
+        return words.isEmpty ? node : .redirected(node: node, redirects: words)
+    }
+
+    /// `>`, `>>`, `<`, `2>`, `&>`, `>file`, `2>&1`, … — after optional `&` and
+    /// digits, the word must reach a `<` or `>`.
+    static func isRedirectWord(_ w: String) -> Bool {
+        var s = Substring(w)
+        if s.hasPrefix("&") { s = s.dropFirst() }
+        while let f = s.first, f.isNumber { s = s.dropFirst() }
+        return s.first == ">" || s.first == "<"
+    }
+
+    /// True for a bare operator (`>`, `2>>`) whose filename is the next word;
+    /// false when the word carries its own target (`>f`, `2>&1`).
+    static func redirectTargetIsNextWord(_ w: String) -> Bool {
+        var s = Substring(w)
+        if s.hasPrefix("&") { s = s.dropFirst() }
+        while let f = s.first, f.isNumber { s = s.dropFirst() }
+        while let f = s.first, f == ">" || f == "<" { s = s.dropFirst() }
+        return s.isEmpty
     }
 
     /// Reads a single command line (one already-expanded command, which may

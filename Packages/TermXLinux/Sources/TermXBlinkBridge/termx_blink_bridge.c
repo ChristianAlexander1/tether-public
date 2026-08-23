@@ -49,6 +49,7 @@ void TerminateSignal(struct Machine *m, int sig, int code) {
   DisableJit(&m->system->jit);
 #endif
   syssig = XlatSignal(sig);
+  if (g_machine == m) g_machine = NULL;  /* don't leave a dangling machine */
   FreeMachine(m);
 #ifdef HAVE_JIT
   ShutdownJit();

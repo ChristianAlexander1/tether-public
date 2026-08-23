@@ -113,6 +113,12 @@ final class NodeMobileRuntime: NodeRuntime {
         jobWriteFD = jobPipe.write
         jobReadFD = replyPipe.read
 
+        // bootstrap.js polls the job fd with fs.readSync on an unref'd timer
+        // (so 'beforeExit' can fire when a script's event loop drains); the fd
+        // must be non-blocking or the first empty poll would block the engine.
+        let flags = fcntl(jobPipe.read, F_GETFL)
+        _ = fcntl(jobPipe.read, F_SETFL, flags | O_NONBLOCK)
+
         var env = NodeEnvironment.merge(base: baseEnv, cwd: cwd)
         env["TERMX_JOB_FD"] = String(jobPipe.read)
         env["TERMX_JOB_REPLY_FD"] = String(replyPipe.write)
@@ -120,7 +126,18 @@ final class NodeMobileRuntime: NodeRuntime {
             setenv(key, value, 1)
         }
 
-        let argv = ["node", "--require", shim, bootstrap]
+        // iOS forbids writable+executable pages, so Node must be jitless. The
+        // NodeMobile 18.20.4 iOS binary still enters V8's *interpreter*
+        // bytecode-budget tiering hook despite `--jitless`; its first npm
+        // invocation dereferences an invalid SharedFunctionInfo there. Give
+        // each function the largest signed budget, keeping normal command
+        // workloads below that broken hook while retaining the interpreter.
+        // This is intentionally an engine-start flag, not user-controllable
+        // NODE_OPTIONS, so every job has the same iOS-safe execution policy.
+        let argv = [
+            "node", "--jitless", "--interrupt-budget=2147483647",
+            "--require", shim, bootstrap,
+        ]
         guard storeLaunchArgv(argv) else {
             return .failure("node: failed to prepare node_start argv\n")
         }
@@ -157,15 +174,48 @@ final class NodeMobileRuntime: NodeRuntime {
         ]
 
         var nodeArgs = job.argv
-        if let first = nodeArgs.first, first == "node" || first.hasSuffix("/node") {
+        let isNode = nodeArgs.first == "node" || (nodeArgs.first?.hasSuffix("/node") ?? false)
+        if isNode {
             nodeArgs = Array(nodeArgs.dropFirst())
         }
-        if nodeArgs.first == "-e", nodeArgs.count >= 2 {
-            payload["kind"] = "eval"
-            payload["source"] = nodeArgs[1]
-        } else {
-            payload["kind"] = "script"
+
+        // Bare `node` has no script for runMain(), which crashed with
+        // "paths[0] must be of type string"; the in-process REPL isn't wired up.
+        if isNode, nodeArgs.isEmpty {
+            payload["kind"] = "usageError"
+            payload["message"] = "node: the interactive REPL isn't supported yet — "
+                + "use node <script.js>, node -e \"code\", or node -p \"expr\""
+            return payload
         }
+
+        // Node's own CLI flags. Without these every flag falls through to the
+        // module loader, so `node --version` came back as
+        // "Cannot find module '--version'".
+        if isNode, let flag = nodeArgs.first, flag.hasPrefix("-") {
+            switch flag {
+            case "--version", "-v":
+                payload["kind"] = "version"
+                return payload
+            case "-h", "--help":
+                payload["kind"] = "help"
+                return payload
+            case "-e", "--eval", "-p", "--print":
+                guard nodeArgs.count >= 2 else {
+                    payload["kind"] = "usageError"
+                    payload["message"] = "node: \(flag) requires an argument"
+                    return payload
+                }
+                payload["kind"] = (flag == "-p" || flag == "--print") ? "print" : "eval"
+                payload["source"] = nodeArgs[1]
+                return payload
+            default:
+                payload["kind"] = "usageError"
+                payload["message"] = "node: bad option: \(flag)"
+                return payload
+            }
+        }
+
+        payload["kind"] = "script"
         return payload
     }
 

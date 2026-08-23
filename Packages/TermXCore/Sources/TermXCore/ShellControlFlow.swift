@@ -16,18 +16,28 @@ public enum ShellControlFlow {
 
         let items = expandForItems(parsed.itemsPart, executor: executor, shellState: shellState)
 
-        var lastCode: Int32 = 0
-        for item in items {
-            shellState.environ[parsed.variable] = item
-            for bodyLine in parsed.bodyLines {
-                let bodyTrimmed = bodyLine.trimmingCharacters(in: .whitespaces)
-                if bodyTrimmed.isEmpty || bodyTrimmed.hasPrefix("#") { continue }
-                if let forCode = evalForLoop(bodyTrimmed, executor: executor, shellState: shellState) {
-                    lastCode = forCode
-                } else if let ast = ShellParser.parse(bodyTrimmed) {
-                    lastCode = executor.execute(ast)
+        let runLoop: () -> Int32 = {
+            var lastCode: Int32 = 0
+            for item in items {
+                shellState.environ[parsed.variable] = item
+                for bodyLine in parsed.bodyLines {
+                    let bodyTrimmed = bodyLine.trimmingCharacters(in: .whitespaces)
+                    if bodyTrimmed.isEmpty || bodyTrimmed.hasPrefix("#") { continue }
+                    if let forCode = evalForLoop(bodyTrimmed, executor: executor, shellState: shellState) {
+                        lastCode = forCode
+                    } else if let ast = ShellParser.parse(bodyTrimmed) {
+                        lastCode = executor.execute(ast)
+                    }
                 }
             }
+            return lastCode
+        }
+
+        let lastCode: Int32
+        if parsed.redirectSpec.isEmpty {
+            lastCode = runLoop()
+        } else {
+            lastCode = RedirectScope.run(spec: parsed.redirectSpec, state: shellState, body: runLoop)
         }
         shellState.lastExitCode = lastCode
         return lastCode
@@ -37,6 +47,8 @@ public enum ShellControlFlow {
         let variable: String
         let itemsPart: String
         let bodyLines: [String]
+        /// Redirections trailing `done` (`for …; done > f`); empty when none.
+        let redirectSpec: String
     }
 
     static func parseForLoop(_ input: String) -> ParsedForLoop? {
@@ -61,7 +73,20 @@ public enum ShellControlFlow {
             $0.trimmingCharacters(in: .whitespaces)
         }.filter { !$0.isEmpty }
 
-        return ParsedForLoop(variable: varName, itemsPart: itemsPart, bodyLines: bodyLines)
+        // Anything after `done` that looks like a redirection is applied around
+        // the whole loop; other trailing text keeps the old (ignored) behavior.
+        let afterDone = String(afterDo[doneRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+        let redirectSpec: String
+        if let first = afterDone.first,
+           first == ">" || first == "<" || first == "&" || first.isNumber,
+           afterDone.contains(">") || afterDone.contains("<") {
+            redirectSpec = afterDone
+        } else {
+            redirectSpec = ""
+        }
+
+        return ParsedForLoop(variable: varName, itemsPart: itemsPart, bodyLines: bodyLines,
+                             redirectSpec: redirectSpec)
     }
 
     /// Expand for-loop item list (supports globs and quoted words).
