@@ -62,7 +62,10 @@ enum NodeMobilePaths {
 
     static var xcframeworkBinary: String {
         #if targetEnvironment(simulator)
-        return "\(xcframeworkRoot)/ios-arm64_x86_64-simulator/NodeMobile.framework/NodeMobile"
+        // digidem 24.x ships arm64-simulator only (no x86_64 slice).
+        let arm64Sim = "\(xcframeworkRoot)/ios-arm64-simulator/NodeMobile.framework/NodeMobile"
+        let universalSim = "\(xcframeworkRoot)/ios-arm64_x86_64-simulator/NodeMobile.framework/NodeMobile"
+        return FileManager.default.fileExists(atPath: arm64Sim) ? arm64Sim : universalSim
         #else
         return "\(xcframeworkRoot)/ios-arm64/NodeMobile.framework/NodeMobile"
         #endif

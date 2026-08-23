@@ -145,4 +145,5 @@ xcodebuild -scheme Tether -destination 'platform=iOS Simulator,name=iPhone 17 Pr
   A native `git` (libgit2) is still on the roadmap.
 - The Linux lane is an **x86-64 interpreter**, so guest programs are slower than native
   ones. Native `python3`/`node` and the built-in commands run at full speed.
-- `claude` needs a real Anthropic login (task T4), which has not been exercised yet.
+- `claude` is installed via npm (`@anthropic-ai/claude-code@2.1.110`). Run
+  `claude --version`, then `claude login` with your Anthropic account.

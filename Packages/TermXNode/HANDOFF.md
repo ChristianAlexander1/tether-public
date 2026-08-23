@@ -24,10 +24,11 @@ cd TermX/Packages/TermXNode && swift test
 ```
 
 Outputs:
-- `TermX/Frameworks/NodeMobile.xcframework` (ios-arm64 + ios-arm64_x86_64-simulator)
+- `Frameworks/NodeMobile.xcframework` (ios-arm64 + ios-arm64-simulator; digidem lite)
 - `TermX/Frameworks/include/node` (headers)
 
-Upstream: **nodejs-mobile v18.20.4** — https://github.com/nodejs-mobile/nodejs-mobile/releases/tag/v18.20.4
+Upstream pin: **digidem/nodejs-mobile v24.19.0-1 lite** — https://github.com/digidem/nodejs-mobile/releases/tag/v24.19.0-1
+(Lineage: nodejs-mobile; official org stopped at v18.20.4 / V8 10.2)
 
 ## Test results (2026-08-22, macOS arm64, after T1/T8)
 

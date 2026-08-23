@@ -13,6 +13,70 @@
 
 const Module = require('module');
 
+// iOS embedding: Node shares the app process. libuv's uv_set_process_title
+// (reached via `process.title = …`) uses argv bookkeeping that node_start
+// does not set up the same way as a standalone binary, and SIGTRAPs the
+// process. Replace the native accessor with an in-memory title so npm and
+// other CLIs keep their real behavior without touching libuv.
+(function neutralizeProcessTitle() {
+  let title = 'node';
+  try {
+    title = String(process.title || 'node');
+  } catch (_) {
+    /* ignore */
+  }
+  try {
+    delete process.title;
+  } catch (_) {
+    /* ignore */
+  }
+  try {
+    Object.defineProperty(process, 'title', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return title;
+      },
+      set(value) {
+        title = String(value);
+      },
+    });
+  } catch (_) {
+    /* last resort: leave native accessor; title writes may still crash */
+  }
+})();
+
+// iOS reports process.platform === 'ios', which breaks npm optionalDependencies
+// and packages that key on darwin/linux/win32 (Claude Code, sharp, …). The OS
+// is Darwin underneath; expose that so the Node package ecosystem resolves
+// the same way it does on a Mac terminal. os.platform() already returns
+// 'darwin' via lib/os.js — keep process.platform in sync.
+(function reportDarwinPlatform() {
+  try {
+    delete process.platform;
+  } catch (_) {
+    /* ignore */
+  }
+  try {
+    Object.defineProperty(process, 'platform', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return 'darwin';
+      },
+      set() {
+        /* immutable for package compatibility */
+      },
+    });
+  } catch (_) {
+    try {
+      process.platform = 'darwin';
+    } catch (_) {
+      /* leave native 'ios' if the engine forbids override */
+    }
+  }
+})();
+
 const overrides = {
   child_process: require('./lib/child_process'),
   os: require('./lib/os'),

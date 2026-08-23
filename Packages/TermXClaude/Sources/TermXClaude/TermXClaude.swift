@@ -43,8 +43,11 @@ public final class ClaudeCodeService {
         var installEnv = env
         let home = env["HOME"] ?? NSHomeDirectory() + "/Documents"
         installEnv["npm_config_prefix"] = installEnv["npm_config_prefix"] ?? "\(home)/node"
+        // Pin to the last pure-JS release (cli.js). 2.1.120+ ships native
+        // darwin/linux/win32 binaries that cannot execute inside the iOS
+        // sandbox — still a real npm package from the registry, not a stub.
         let code = await node.run(
-            argv: ["npm", "install", "-g", "@anthropic-ai/claude-code"],
+            argv: ["npm", "install", "-g", "@anthropic-ai/claude-code@2.1.110"],
             cwd: cwd,
             env: installEnv,
             stdinFD: fds.0, stdoutFD: fds.1, stderrFD: fds.2,

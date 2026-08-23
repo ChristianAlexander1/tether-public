@@ -12,4 +12,6 @@ furnished to do so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
 
-See upstream: https://github.com/nodejs-mobile/nodejs-mobile (release v18.20.4)
+Upstream lineage: https://github.com/nodejs-mobile/nodejs-mobile
+Maintained mobile fork used by Tether: https://github.com/digidem/nodejs-mobile
+(release v24.19.0-1, lite iOS xcframework — Node 24.19.0, interpreter-only V8)

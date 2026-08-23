@@ -1,0 +1,7 @@
+repo=digidem/nodejs-mobile
+tag=v24.19.0-1
+flavor=full
+asset=nodejs-mobile-ios-24.19.0-1.zip
+sha256=e7633a60e55443ca11ee4c28ff7a43294a6ace9aa3362a6c0213a843b4c4f840
+node=24.19.0
+fetched=2026-08-23T02:07:01Z

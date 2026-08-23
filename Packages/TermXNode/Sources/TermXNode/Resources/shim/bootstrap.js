@@ -16,6 +16,23 @@
  */
 require('./index.js');
 
+// Re-assert the title shim after engine startup. `--require` already ran
+// index.js, but some Node builds reinstall the native process.title accessor
+// during bootstrap; without this, `npm` dies inside uv_set_process_title.
+(function reassertProcessTitle() {
+  let title = 'node';
+  try { title = String(process.title || 'node'); } catch (_) { /* ignore */ }
+  try { delete process.title; } catch (_) { /* ignore */ }
+  try {
+    Object.defineProperty(process, 'title', {
+      configurable: true,
+      enumerable: true,
+      get() { return title; },
+      set(value) { title = String(value); },
+    });
+  } catch (_) { /* ignore */ }
+})();
+
 const fs = require('fs');
 const ipc = require('./lib/ipc');
 
@@ -156,7 +173,27 @@ async function runJob(job, onDone) {
     const onBeforeExit = () => finishScript(process.exitCode ?? 0);
     process.on('beforeExit', onBeforeExit);
 
-    require('module').runMain();
+    // `Module.runMain()` is Node's one-shot process bootstrap path. The
+    // embedded engine has already used it for this service bootstrap, so load
+    // a command as a module instead of trying to start a second main program.
+    // This is also the right relative-path behavior for `node script.js`:
+    // resolve it from the job cwd, not as a package name.
+    const entry = argv[1];
+    if (!entry) {
+      throw new Error('node: script path is missing');
+    }
+    const path = require('path');
+    const resolvedEntry = path.isAbsolute(entry) ? entry : path.resolve(process.cwd(), entry);
+    if (resolvedEntry.endsWith('.mjs')) {
+      // Dynamic import preserves ESM support. Its completion is accounted for
+      // by the job's beforeExit handler, exactly like an async CommonJS CLI.
+      await import(require('url').pathToFileURL(resolvedEntry).href);
+    } else {
+      // A CLI must execute for every terminal invocation; normal require()
+      // caching would make a second `node script.js` silently do nothing.
+      delete require.cache[require.resolve(resolvedEntry)];
+      require(resolvedEntry);
+    }
     // No reply here: the script finishes via process.exit (trapped), an
     // uncaught error, or the event loop draining (beforeExit).
   } catch (err) {

@@ -38,6 +38,14 @@ final class NodeTests: XCTestCase {
         XCTAssertTrue(child.contains("fork"))
         let ipc = try String(contentsOf: shimRoot.appendingPathComponent("lib/ipc.js"))
         XCTAssertTrue(ipc.contains("roundTrip"))
+
+        let bootstrap = try String(contentsOf: shimRoot.appendingPathComponent("bootstrap.js"))
+        XCTAssertFalse(bootstrap.contains("require('module').runMain()"),
+                       "a persistent engine must not re-enter Node's one-shot runMain bootstrap")
+        XCTAssertTrue(bootstrap.contains("path.resolve(process.cwd(), entry)"),
+                      "file-based node jobs must resolve relative to the workspace")
+        XCTAssertTrue(bootstrap.contains("delete require.cache[require.resolve(resolvedEntry)]"),
+                      "a CLI entry point must execute again in the persistent engine")
     }
 
     func testRegistryJSONLoads() throws {

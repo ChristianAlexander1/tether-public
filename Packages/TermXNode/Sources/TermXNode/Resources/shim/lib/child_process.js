@@ -15,6 +15,7 @@
 const { EventEmitter } = require('events');
 const { Readable, Writable } = require('stream');
 const ipc = require('./ipc');
+const nestedNode = require('./nested_node');
 
 const SHELL = '/bin/sh';
 const DEFAULT_MAX_BUFFER = 1024 * 1024; // 1 MiB, matches Node's exec/execFile default.
@@ -155,6 +156,17 @@ function spawnSync(file, args, options) {
   const n = normalizeSpawnArgs(file, args, options);
   const opts = n.options;
   const enc = toEncoding(opts);
+
+  // Single-engine embed: nested `node` must run inline. Routing it through
+  // Swift IPC deadlocks the job that is already on the engine (npm postinstall).
+  if (nestedNode.isNodeBinary(n.file)) {
+    return nestedNode.runNodeSync(n.args, {
+      cwd: opts.cwd,
+      env: opts.env,
+      encoding: enc === null ? 'buffer' : enc,
+    });
+  }
+
   const req = buildRequest(n.file, n.args, opts, 'spawnSync');
   req.encoding = enc === null ? 'buffer' : enc;
 
@@ -348,6 +360,30 @@ function spawn(file, args, options) {
   child._spawnfile = n.file;
   child._spawnargs = n.args.slice();
   buildSpawnStreams(child, sIn, sOut, sErr);
+
+  // Nested node: same deadlock rule as spawnSync. Run inline on next tick so
+  // listeners are attached, then emit exit/close with the real status.
+  if (nestedNode.isNodeBinary(n.file)) {
+    process.nextTick(() => {
+      const result = nestedNode.runNodeSync(n.args, {
+        cwd: opts.cwd,
+        env: opts.env,
+        encoding: enc === null ? 'buffer' : enc,
+      });
+      child.pid = result.pid;
+      child._spawned = true;
+      child.emit('spawn');
+      feedStream(child.stdout, result.stdout && result.stdout.toString ? result.stdout.toString() : result.stdout);
+      feedStream(child.stderr, result.stderr && result.stderr.toString ? result.stderr.toString() : result.stderr);
+      child._exitCode = result.status;
+      child._signalCode = result.signal;
+      child._exited = true;
+      if (child.stdin && sIn === 'pipe') child.stdin.end();
+      child.emit('exit', child.exitCode, child.signalCode);
+      child.emit('close', child.exitCode, child.signalCode);
+    });
+    return child;
+  }
 
   const req = buildRequest(n.file, n.args, opts, 'spawn');
   req.encoding = enc === null ? 'buffer' : enc;

@@ -6,8 +6,9 @@ import TermXCore
 /// (the same install-on-first-use pattern as the Alpine rootfs) and every
 /// `npm`/`npx` invocation is rewritten to `node <npm-cli.js> …`.
 enum NpmBootstrap {
-    /// npm 10.x is the line matching the embedded Node 18 (npm needs ^18.17).
-    static let pinnedVersion = "10.8.2"
+    /// npm 10.9.x is the current 10.x line; works with embedded Node 24.
+    /// (Still a real registry tarball — not a stub.)
+    static let pinnedVersion = "10.9.2"
 
     static func npmRoot(home: String) -> String {
         home + "/node/lib/node_modules/npm"
@@ -109,8 +110,33 @@ enum NodeCommandResolver {
         let bin = home + "/node/bin/\(name)"
         if fileExists(bin) {
             let resolved = URL(fileURLWithPath: bin).resolvingSymlinksInPath().path
+            // Native-wrapper packages (Claude Code ≥2.1.120) point bin at
+            // `bin/claude.exe`. Prefer a sibling JS entry so the embedded
+            // engine can actually run the tool.
+            if let jsEntry = Self.jsEntry(replacingNativeBin: resolved, fileExists: fileExists) {
+                return .run(["node", jsEntry] + argv.dropFirst())
+            }
             return .run(["node", resolved] + argv.dropFirst())
         }
         return .notFound(name)
+    }
+
+    /// If `resolved` looks like a native stub (*.exe / extensionless binary
+    /// next to `cli.js` / `cli-wrapper.cjs`), return the JS entry instead.
+    private static func jsEntry(replacingNativeBin resolved: String,
+                                fileExists: (String) -> Bool) -> String? {
+        let url = URL(fileURLWithPath: resolved)
+        let dir = url.deletingLastPathComponent()
+        let parent = dir.deletingLastPathComponent()
+        let candidates = [
+            dir.appendingPathComponent("cli.js").path,
+            parent.appendingPathComponent("cli.js").path,
+            dir.appendingPathComponent("cli-wrapper.cjs").path,
+            parent.appendingPathComponent("cli-wrapper.cjs").path,
+        ]
+        let looksNative = resolved.hasSuffix(".exe")
+            || !resolved.hasSuffix(".js") && !resolved.hasSuffix(".cjs") && !resolved.hasSuffix(".mjs")
+        guard looksNative else { return nil }
+        return candidates.first { fileExists($0) }
     }
 }

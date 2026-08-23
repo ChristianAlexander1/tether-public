@@ -3,29 +3,38 @@
 
 ## Headline
 
-**Tether builds, launches, and runs a real terminal with embedded Python, Node, and a
-Linux guest (Blink) on the Simulator** — verified end-to-end by the integrator on
-2026-08-22, after fixing five bugs that made the shipping terminal freeze or silently
-fail (see "Integration verification" below).
+**Tether builds, launches, and runs a real terminal with embedded Python, Node 24
+(npm + Claude Code), and a Linux guest (Blink) on the Simulator.** Node/npm/Claude
+were unblocked by replacing the crashed NodeMobile 18.20.4 binary with digidem
+nodejs-mobile **v24.19.0-1 full** (ICU + `--jitless`), plus mobile shims for
+`process.title`, `process.platform`, and nested `node` lifecycle scripts.
 
 ## Runtime lanes + shell (Simulator evidence, verified 2026-08-22)
 
-Every row below was run inside the app in one session and confirmed by reading the app
-sandbox afterwards:
+Every row below was run inside the app and confirmed by reading the sandbox:
 
 | Command run in the terminal | Result on disk |
 |---|---|
 | `python3 -c 'open("b_py.txt","w").write(str(6*7))'` | `42` |
-| `node -e 'require("fs").writeFileSync("c_node.txt",String(2+2))'` | `4` |
-| `echo alive-after-node > d_after_node.txt` | `alive-after-node` (terminal survives Node) |
-| `printf "one\ntwo\nthree\n" > src.txt` | three lines |
-| `awk "{print NR}" src.txt` | `1 2 3` |
-| `sed "s/one/ONE/" src.txt` | `ONE two three` |
-| `cat src.txt \| wc -l` | `3` |
-| `if [ -f src.txt ]; then echo yes; fi` | `yes` |
-| `i=0; while [ $i -lt 3 ]; do echo n$i; i=$((i+1)); done` | `n0 n1 n2` |
-| `echo count=$(ls \| wc -l)` | `count=9` |
+| `node --version` | `v24.19.0` |
+| `npm --version` | `10.8.2` (real registry CLI) |
+| `npm install -g is-odd` then `require('is-odd')(3)` | `true` |
+| `npm install -g @anthropic-ai/claude-code@2.1.110` | real install; `cli.js` bin |
+| `claude --version` | `2.1.110 (Claude Code)` |
+| `echo alive-after-node > d_after_node.txt` | `alive-after-node` |
 | `linux /bin/busybox echo hi` | `hi` (Alpine rootfs auto-bootstrapped) |
+
+## Node runtime pin
+
+| Item | Value |
+|---|---|
+| Framework | `Frameworks/NodeMobile.xcframework` via `Frameworks/build-nodejs-mobile.sh` |
+| Upstream | [digidem/nodejs-mobile](https://github.com/digidem/nodejs-mobile) `v24.19.0-1` **full** |
+| Why full | lite has no ICU; Claude Code needs `\p{…}` Unicode property escapes |
+| Engine flags | `--jitless` (App Store / iOS W^X) |
+| Claude pin | `@anthropic-ai/claude-code@2.1.110` (last pure-JS `cli.js`; newer ships native bins) |
+
+Details: `docs/12-node-runtime-recovery.md`.
 
 ## Integration verification (2026-08-22, integrator)
 
@@ -71,7 +80,7 @@ absolute PCH paths from the old location. **If the repo ever moves again, delete
 | **T8** Delivered `termx-shim` swapped in | ✅ |
 | **T2** Python stdlib via BeeWare `install_python` build phase | ✅ |
 | **T3** Blink.xcframework + auto Alpine bootstrap | ✅ (Simulator) |
-| **T4** Claude e2e | ⚠️ Node unblocked; real `claude login` still needs a human account |
+| **T4** Claude e2e | ✅ `claude --version` on Simulator (Node 24 + npm install); `claude login` still needs a human Anthropic account |
 | **T5** Device pass / UX | ⚠️ Licenses screen + `docs/DEVICE-PASS.md`; physical device still manual |
 
 ## Package tests (host) — all green, 2026-08-22

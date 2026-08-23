@@ -90,6 +90,15 @@ public final class TermXIntegration {
                 if argv.count > 1, argv[1] == "login" {
                     return await self.claude.login(cwd: state.cwd, env: state.environ, fds: (i, o, e))
                 }
+                // With any CLI args (`--version`, a prompt, …) run the real
+                // installed package through Node — same as typing it on a Mac.
+                // Bare `claude` keeps the first-run install + interactive TUI.
+                if argv.count > 1 {
+                    return await self.node.run(
+                        argv: argv, cwd: state.cwd, env: state.environ,
+                        stdinFD: i, stdoutFD: o, stderrFD: e, interactive: false
+                    )
+                }
                 do {
                     _ = try await self.claude.install(cwd: state.cwd, env: state.environ, fds: (i, o, e))
                     return try await self.claude.run(cwd: state.cwd, env: state.environ, fds: (i, o, e))

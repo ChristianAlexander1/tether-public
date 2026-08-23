@@ -126,18 +126,10 @@ final class NodeMobileRuntime: NodeRuntime {
             setenv(key, value, 1)
         }
 
-        // iOS forbids writable+executable pages, so Node must be jitless. The
-        // NodeMobile 18.20.4 iOS binary still enters V8's *interpreter*
-        // bytecode-budget tiering hook despite `--jitless`; its first npm
-        // invocation dereferences an invalid SharedFunctionInfo there. Give
-        // each function the largest signed budget, keeping normal command
-        // workloads below that broken hook while retaining the interpreter.
-        // This is intentionally an engine-start flag, not user-controllable
-        // NODE_OPTIONS, so every job has the same iOS-safe execution policy.
-        let argv = [
-            "node", "--jitless", "--interrupt-budget=2147483647",
-            "--require", shim, bootstrap,
-        ]
+        // iOS forbids writable+executable pages, so the shared Node engine
+        // must never try to allocate JIT code. Keep this as an engine-start
+        // flag rather than allowing individual jobs to override it.
+        let argv = ["node", "--jitless", "--require", shim, bootstrap]
         guard storeLaunchArgv(argv) else {
             return .failure("node: failed to prepare node_start argv\n")
         }
