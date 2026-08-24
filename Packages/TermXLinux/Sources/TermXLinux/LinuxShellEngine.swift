@@ -6,8 +6,8 @@ import TermXBlinkBridge
 #endif
 
 /// Docker-like login: the interactive terminal *is* Alpine `/bin/sh` under Blink.
-/// The picked workspace is bind-mounted at `/work`. Manifest-listed stubs in
-/// `/usr/local/bin` look like guest commands but proxy to the host worker.
+/// The picked workspace is bind-mounted at `/work`. Manifest-listed launchers
+/// in `/usr/local/bin` dispatch platform runtimes to the host worker.
 public final class LinuxShellEngine: TerminalEngine {
     public let linux: BlinkLinuxService
     public var hostExec: ((String, [String], [String: String], Int32, Int32, Int32) -> Int32)?
@@ -70,8 +70,8 @@ public final class LinuxShellEngine: TerminalEngine {
                     try await self.linux.bootstrap()
                 }
                 try self.mountWorkspace(cwd)
-                try self.ensureGuestIdentity()
-                try self.ensureHostBackedStubs()
+                try self.ensureGuestIntegration()
+                try self.ensureHostRuntimeLaunchers()
             } catch {
                 bootstrapError = String(describing: error)
             }
@@ -101,23 +101,12 @@ public final class LinuxShellEngine: TerminalEngine {
 #endif
     }
 
-    /// Guest should look like a container, not the developer's MacBook hostname.
-    private func ensureGuestIdentity() throws {
+    /// Install shell integration without replacing Linux commands or forging
+    /// kernel/host identity values.
+    private func ensureGuestIntegration() throws {
         let fm = FileManager.default
         let root = linux.rootfs
         try removeLegacyGuestOverrides(from: root)
-        try "tether\n".write(
-            to: root.appendingPathComponent("etc/hostname"),
-            atomically: true, encoding: .utf8
-        )
-        let hosts = """
-        127.0.0.1\tlocalhost tether
-        ::1\t\tlocalhost tether
-        """
-        try hosts.write(
-            to: root.appendingPathComponent("etc/hosts"),
-            atomically: true, encoding: .utf8
-        )
         let profileD = root.appendingPathComponent("etc/profile.d", isDirectory: true)
         try fm.createDirectory(at: profileD, withIntermediateDirectories: true)
         let envScript = """
@@ -135,7 +124,6 @@ public final class LinuxShellEngine: TerminalEngine {
         let profileDir = root.appendingPathComponent("etc/profile.d", isDirectory: true)
         try fm.createDirectory(at: profileDir, withIntermediateDirectories: true)
         let profile = """
-        export HOSTNAME=tether
         export PS1='tether:\\w\\$ '
         """
         try profile.write(
@@ -162,6 +150,13 @@ public final class LinuxShellEngine: TerminalEngine {
                 $0.trimmingCharacters(in: .whitespacesAndNewlines)
                     == "[user]\n\temail = user@tether.local\n\tname = tether"
             }),
+            ("etc/hostname", {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines) == "tether"
+            }),
+            ("etc/hosts", {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    == "127.0.0.1\tlocalhost tether\n::1\t\tlocalhost tether"
+            }),
         ]
         for (relative, wasGeneratedByTether) in candidates {
             let url = root.appendingPathComponent(relative)
@@ -171,24 +166,14 @@ public final class LinuxShellEngine: TerminalEngine {
         }
     }
 
-    private func ensureHostBackedStubs() throws {
-        let fm = FileManager.default
-        let busybox = linux.rootfs.appendingPathComponent("bin/busybox").path
-        guard fm.fileExists(atPath: busybox) else { return }
-        let destDir = linux.rootfs.appendingPathComponent("usr/local/bin", isDirectory: true)
-        try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
-        // Manifest-listed stubs proxy to host (see tether_dispatch_manifest.json).
-        for name in dispatchManifest.stubBasenames {
-            let dest = destDir.appendingPathComponent(name).path
-            // May already exist as our uname/hostname scripts directory.
-            if fm.fileExists(atPath: dest) {
-                // Replace non-stub leftovers only when still a busybox copy is desired —
-                // Skip an existing guest or previously-installed proxy command.
-                continue
-            }
-            try fm.copyItem(atPath: busybox, toPath: dest)
-            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dest)
-        }
+    private func ensureHostRuntimeLaunchers() throws {
+        // Use symlinks, as a normal BusyBox applet installation does. Blink
+        // dispatches these manifest names before loading BusyBox; the link is
+        // only the executable PATH entry required by Linux exec resolution.
+        try GuestRuntimeLauncherInstaller.install(
+            names: dispatchManifest.launcherBasenames,
+            rootfs: linux.rootfs
+        )
     }
 
     private func installHostExecBridge() {

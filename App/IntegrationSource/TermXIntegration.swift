@@ -12,7 +12,7 @@ import TermXFiles
 /// the guest shell, workspace at `/work`. `claude` / `node` / `npm` are
 /// host-backed from inside that shell (Bun cannot run under Blink).
 ///
-/// Host `TermXShellEngine` remains available behind `TERMX_HOST_SHELL=1` for debugging.
+/// Host `TermXShellEngine` remains available behind `TETHER_HOST_SHELL=1` for debugging.
 public final class TermXIntegration {
     private var _python: EmbeddedPythonService?
     private var _node: EmbeddedNodeService?
@@ -54,7 +54,7 @@ public final class TermXIntegration {
         }
         var lines: [String] = [
             "engine: Alpine Linux (Blink) primary",
-            "TERMX_HOST_SHELL: \(ProcessInfo.processInfo.environment["TERMX_HOST_SHELL"] ?? "0")",
+            "TETHER_HOST_SHELL: \(ProcessInfo.processInfo.environment["TETHER_HOST_SHELL"] ?? ProcessInfo.processInfo.environment["TERMX_HOST_SHELL"] ?? "0")",
             "linux.state: \(linux.state)",
             "linux.rootfs: \(linux.rootfs.path)",
             "linux.blink.ready: \(linux.state == .ready ? "yes" : "no")",
@@ -63,11 +63,11 @@ public final class TermXIntegration {
             "claude.launcher: \(fm.fileExists(atPath: launcher) ? "yes" : "no") \(launcher)",
             "claude.extractedJS: \(fm.fileExists(atPath: js) ? "yes" : "no")",
             "claude.bun-shim: \(fm.fileExists(atPath: shim) ? "yes" : "no")",
-            "claude.openStub: \(fm.fileExists(atPath: (ClaudeRuntimeProbe.installRoot(home: home) as NSString).appendingPathComponent("termx-open-stub.js")) ? "yes" : "no")",
+            "browser.bridge: generic child-process opener",
             "claude.shim.whichOpenFix: \(shimHasWhichFix ? "yes" : "NO — rebuild app")",
             "claude.nodeModules: \(ClaudeRuntimeProbe.nodeModulesReady(home: home) ? "yes" : "no")",
             "claude.browserEnv: DISPLAY=:0 BROWSER=open (linux-extract OAuth)",
-            "guest.HOSTNAME: tether (expected)",
+            "guest.identity: reported by the real Blink/Linux runtime",
             "open.path: in-app SFSafariViewController (not Mac Safari)",
             "open.guestLocalhost: curl inside Alpine (not Simulator Safari)",
             "open.localhost.note: Mac Safari 127.0.0.1 ≠ Alpine guest 127.0.0.1 — use xdg-open in Tether only",
@@ -118,7 +118,8 @@ public final class TermXIntegration {
 
     /// Primary engine: Linux login shell (Docker-like).
     public func makePrimaryEngine() -> any TerminalEngine {
-        if ProcessInfo.processInfo.environment["TERMX_HOST_SHELL"] == "1" {
+        if (ProcessInfo.processInfo.environment["TETHER_HOST_SHELL"]
+            ?? ProcessInfo.processInfo.environment["TERMX_HOST_SHELL"]) == "1" {
             return makeHostShellEngine()
         }
         return makeLinuxShellEngine()
@@ -175,9 +176,9 @@ public final class TermXIntegration {
         let escaped = url.absoluteString.replacingOccurrences(of: "'", with: "'\\''")
         let cmd = """
         if command -v curl >/dev/null; then
-          curl -sS -w '\\n__TERMX_HTTP__%{http_code}' --max-time 3 '\(escaped)'
+          curl -sS -w '\\n__TETHER_HTTP__%{http_code}' --max-time 3 '\(escaped)'
         else
-          wget -qO- -T 3 -t 1 '\(escaped)'; echo '\\n__TERMX_HTTP__000'
+          wget -qO- -T 3 -t 1 '\(escaped)'; echo '\\n__TETHER_HTTP__000'
         fi
         """
         var lastErr = ""
@@ -234,14 +235,14 @@ public final class TermXIntegration {
             \(lastErr)
             The port answered but not with your page — often a stale server or wrong folder.
             MacBook Safari on the same URL is NOT the phone guest; ignore Mac localhost.
-            Try: pkill -f http.server; echo '<h1>guest ok</h1>' > index.html; python3 -m http.server \(url.port ?? 9999) &
+            Stop the existing server process, start it from the intended directory, and retry.
             """)
         }
         return .failure(lastErr.isEmpty ? "guest fetch failed after retries" : lastErr)
     }
 
     private static func parseGuestHTTPResponse(_ raw: Data) -> (body: Data, status: Int)? {
-        let marker = Data("__TERMX_HTTP__".utf8)
+        let marker = Data("__TETHER_HTTP__".utf8)
         guard raw.count > marker.count,
               let range = raw.range(of: marker, options: .backwards) else { return nil }
         let body = raw.subdata(in: 0..<range.lowerBound)

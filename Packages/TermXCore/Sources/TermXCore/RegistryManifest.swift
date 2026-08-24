@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Command Registry Manifest Schema (09-integration-contracts.md §2.5)
+// MARK: - Command registry manifest schema
 
 public struct CommandManifestEntry: Codable, Equatable, Sendable {
     public let name: String

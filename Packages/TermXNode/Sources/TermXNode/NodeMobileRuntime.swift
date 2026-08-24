@@ -138,6 +138,8 @@ final class NodeMobileRuntime: NodeRuntime {
         _ = fcntl(jobPipe.read, F_SETFL, flags | O_NONBLOCK)
 
         var env = NodeEnvironment.merge(base: baseEnv, cwd: cwd)
+        env["TETHER_JOB_FD"] = String(jobPipe.read)
+        env["TETHER_JOB_REPLY_FD"] = String(replyPipe.write)
         env["TERMX_JOB_FD"] = String(jobPipe.read)
         env["TERMX_JOB_REPLY_FD"] = String(replyPipe.write)
         for (key, value) in env {

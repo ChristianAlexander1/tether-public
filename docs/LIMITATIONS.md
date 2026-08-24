@@ -1,20 +1,18 @@
-# Platform limitations (honest gaps)
+# Architectural boundaries and release gates
 
-Track IDs point to work in `13-parallel-agent-plan.md` / `10-remaining-work.md`.
-**Fix guest/syscalls/manifest — never add tool names to host lists.**
+This file records concrete engineering boundaries. It is not permission to add
+per-program workarounds.
 
-| Gap | Symptom | Owner track |
-|-----|---------|-------------|
-| ~~Hardcoded `path_is_host_backed()`~~ | ~~Wrong lane for apk tools~~ | **Fixed in-repo** — manifest dispatch |
-| Guest login env | Some CLIs skip open without DISPLAY | **Fixed** — `etc/profile.d/tether-env.sh` |
-| SpawnExecuting no guest one-shot | JS CLI can't spawn guest ELFs in PATH | Mac / TermXNode |
-| Single Blink session rules | Crash on parallel `blink_run` | I2, PROJECT-CONTEXT |
-| `/workspaces/*` binds | Only `/work` mounted today | I2 |
-| Syscall holes | Specific guest binaries fail | P7 harness |
-| DEC 2031 / width | TUI layout glitches | P9 |
-| ios_system tier | No native fast PATH yet | I1, P12 |
-| fakefs rootfs | Large apk trees slow on device | P4 |
+| Boundary | Current evidence | Correct remedy |
+|---|---|---|
+| Embedded Node cannot synchronously enter the already-running Blink machine for an arbitrary child ELF | The bridge now delegates every name to the generic executor; app-native commands work, unknown guest-only commands return ENOENT | add a safe nested guest execution channel or broaden a real native command tier; never special-case Claude/Git |
+| Alpine Node aborts under Darwin Blink because libuv expects Linux epoll behavior | real `apk add nodejs npm` succeeded; `/usr/bin/node` aborted in `uv_loop_init` | implement/test portable epoll semantics in the selected emulator before choosing guest Node |
+| Blink exposes a subset of Linux `/proc` and syscalls | P7’s 42-fixture harness and network acceptance define reproducible coverage | add generic Blink/VFS behavior with a regression fixture |
+| fakefs is immutable | all six pack/read/symlink/CRC tests pass; `apk` requires writes | design a writable upper layer and atomic metadata updates before mounting it |
+| WASI is capability-scoped, not a full Linux process | arbitrary modules, args, env, fds and cancellation work | implement missing WASI calls generically when a real module demonstrates need |
+| Physical-device signing, jetsam behavior and account OAuth are not simulator facts | simulator build/launch and browser dispatch pass | complete `DEVICE-PASS.md` on signed hardware and record the result |
 
-Update this file when a gap closes or a harness adds a new failure ID.
-
-See **`GUEST-PLATFORM.md`** §8 for the diagnostic tree.
+The product should not claim universal Linux syscall compatibility. It should
+claim—and continuously verify—that ordinary Alpine software runs under the
+documented Blink platform, while failures are fixed at the shared platform
+boundary.

@@ -53,7 +53,8 @@ public enum SystemOpen {
     /// Fetches a page from guest 127.0.0.1 (curl inside Alpine). Set by the app shell.
     public static var guestLocalhostFetcher: (@Sendable (URL) async -> GuestFetchOutcome)?
 
-    /// Optional debug hook (`TERMX_LOG_OPEN=1` enables NSLog-style tracing via print).
+    /// Optional application-provided debug hook. Structured diagnostics are
+    /// always recorded independently by `SystemOpenDiagnostics`.
     public static var openLogger: (@Sendable (String) -> Void)?
 
     public static func log(_ message: String) {

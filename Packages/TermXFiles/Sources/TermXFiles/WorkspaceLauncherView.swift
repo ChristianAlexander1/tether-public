@@ -2,7 +2,7 @@
 import SwiftUI
 
 /// Launcher screen: recent workspaces grid + "Open Folder…" button.
-/// Implements the C3 deliverable requirement from docs/03-filesystem-folders.md.
+/// Workspace picker and bookmark-backed launcher used by the app shell.
 public struct WorkspaceLauncherView: View {
     @ObservedObject private var viewModel: WorkspaceLauncherViewModel
 

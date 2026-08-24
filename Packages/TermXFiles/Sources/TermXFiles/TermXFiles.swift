@@ -13,7 +13,7 @@ let workspaceBookmarkCreationOptions: URL.BookmarkCreationOptions = []
 let workspaceBookmarkResolutionOptions: URL.BookmarkResolutionOptions = []
 #endif
 
-// MARK: - Frozen API Types (from 09-integration-contracts.md §2.3)
+// MARK: - Public workspace API types
 
 public struct Workspace: Codable, Identifiable, Hashable, Sendable {
     public let id: UUID

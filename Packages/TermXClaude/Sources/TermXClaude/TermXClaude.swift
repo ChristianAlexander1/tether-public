@@ -67,6 +67,7 @@ public final class ClaudeCodeService {
 
     public static func launchEnvironment(base: [String: String]) -> [String: String] {
         var env = base
+        env["TETHER_INTERACTIVE"] = "1"
         env["TERMX_INTERACTIVE"] = "1"
         env["DISABLE_AUTOUPDATER"] = env["DISABLE_AUTOUPDATER"] ?? "1"
         env["DISABLE_UPDATES"] = env["DISABLE_UPDATES"] ?? "1"
@@ -75,9 +76,10 @@ public final class ClaudeCodeService {
         // Extracted Claude JS hardcodes platform "linux" (Bun linux tarball). Its open
         // helper skips the browser when DISPLAY/WAYLAND are unset (no_display).
         env["DISPLAY"] = env["DISPLAY"] ?? ":0"
-        env["WAYLAND_DISPLAY"] = env["WAYLAND_DISPLAY"] ?? "termx"
+        env["WAYLAND_DISPLAY"] = env["WAYLAND_DISPLAY"] ?? "tether"
         env["BROWSER"] = env["BROWSER"] ?? "open"
-        if let preload = ProcessInfo.processInfo.environment["TERMX_SHIM_PRELOAD"] {
+        if let preload = ProcessInfo.processInfo.environment["TETHER_SHIM_PRELOAD"]
+            ?? ProcessInfo.processInfo.environment["TERMX_SHIM_PRELOAD"] {
             env["NODE_OPTIONS"] = "--require \(preload)"
         }
         return env

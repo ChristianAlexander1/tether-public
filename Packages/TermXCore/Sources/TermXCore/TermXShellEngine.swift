@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Frozen TerminalEngine Protocol (09-integration-contracts.md §2.2)
+// MARK: - Terminal engine protocol
 
 public protocol TerminalEngine: AnyObject {
     func startShell(cwd: String, env: [String: String],

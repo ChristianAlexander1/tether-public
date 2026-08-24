@@ -2,7 +2,7 @@
 
 ## Implemented Surface
 
-TermXCore provides the C2 shell and command execution engine described in `docs/02-shell-core.md` and `docs/09-integration-contracts.md` §2.1 & §2.2.
+TermXCore provides the host shell and command execution engine described in `docs/ARCHITECTURE.md`.
 
 ### Frozen APIs (Preserved Exactly)
 
@@ -58,7 +58,7 @@ TermXCore provides the C2 shell and command execution engine described in `docs/
 ## Build and Tests
 
 ```sh
-cd TermX/Packages/TermXCore && swift test
+cd Packages/TermXCore && swift test
 ```
 
 ### Acceptance Test Results (2026-08-22, macOS arm64 — `swift test`)
@@ -68,7 +68,7 @@ Test Suite 'All tests' passed.
 Executed 28 tests, with 0 failures (0 unexpected) in 0.339s
 ```
 
-| C2 Acceptance (docs/09 §3) | Test | Status |
+| Shell/core acceptance | Test | Status |
 |---|---|---|
 | 100-command smoke run | `test100CommandSmokeRun` | PASSED |
 | `ls \| grep x > f && cat f` | `testAcceptancePipelineRedirectAnd` | PASSED |
@@ -83,15 +83,14 @@ Executed 28 tests, with 0 failures (0 unexpected) in 0.339s
 
 Additional unit tests (parser, lexer, builtins, VirtualProcess, file ops): 19 tests — all PASSED.
 
-## Deferred to Integrator (documented blockers)
+## Runtime boundaries
 
 | Item | Status | Notes |
 |---|---|---|
-| **ios_system xcframework** | Not built | Pure-Swift `CoreCommands` provides ~30 native commands. ios_system fork requires Mac cross-compile pipeline; no GPL code included. |
-| **mksh/dash port** | Partially superseded | `TermXShellLang` (T7) now provides `if`/`while`/`until`/`case`/functions/here-docs; `for` loops remain in `ShellControlFlow`. Full mksh binary port still deferred. |
-| **Native Rust `rg`/`jq`/`fd`** | Fallback only | MIT-licensed pure-Swift implementations in `ToolCommands.swift`. Static iOS Rust builds can replace via `termx_register_command` without API changes. |
-| **iOS Simulator soak** | macOS tested | All tests pass on macOS arm64 via SwiftPM. Integrator should re-run on iOS Simulator (same test target, Xcode 16). |
-| **WASM tier / Linux tier** | Out of C2 scope | Dispatcher hooks (`registerFallback`, manifest `kind: linux\|wasm`) are in place for C6/C4 wiring. |
+| **Native command lane** | The shipped Swift command set is used by the host shell. Native Rust tools under `Vendor/TetherNativeTools` are source/build inputs, not substituted mini implementations. |
+| **Shell language lane** | `External/TermXShellLang` backs the production host shell; `External/TetherShellLang` is an independently tested conformance evaluator. |
+| **Linux/WASM lanes** | The app routes Linux execution through Blink and WASM execution through `External/TetherWasm`; neither is emulated by shell fixtures. |
+| **iOS validation** | Use the repository-level `scripts/validate.sh --ios` gate; canonical evidence and remaining device-only checks live in `docs/VALIDATION.md`. |
 
 ## External package integration (T6 / T7 — 2026-08-22)
 

@@ -1,108 +1,30 @@
-# Tether — project context
+# Project context
 
-**Read this first in any new session.** It carries the decisions, gotchas and current state
-that would otherwise be lost when a conversation ends.
+Tether is a Linux-first iOS developer terminal. The selected folder is mounted
+at `/work`; Alpine packages run as guest ELF programs under Blink. Embedded
+Python, Node and WASI are platform runtime lanes, not per-application command
+fakes.
 
-## What this is
+## Invariants
 
-Tether is a native iOS/iPadOS terminal. You pick a folder, get a real pty shell inside it,
-and run Unix commands, Python, Node, and a Linux guest — with the long-term goal of running
-Claude Code locally against your project. It is built to be published on the App Store, so
-**no GPL code is bundled**.
+- Guest ELF is the default dispatch result.
+- Never block UIKit’s main thread on PTY, browser or process work.
+- A terminal does not imply stdin EOF; do not drain an interactive PTY to EOF.
+- Do not close a descriptor while another thread is blocked on it.
+- Do not start a second Blink run while the login machine owns the guest.
+- Do not forge OS, Git, hostname, CPU or memory data.
+- New environment/configuration names use `TETHER_`; legacy `TERMX_` inputs are
+  read only where compatibility still matters.
+- Edit `project.yml` and regenerate `Tether.xcodeproj`.
 
-- App name / bundle id: **Tether** / `com.tether.app` (renamed from TermX on 2026-08-22).
-- Internal Swift modules are still named `TermX*` (TermXCore, TermXUI, …). That is
-  deliberate: renaming ~1,100 files is a large mechanical sweep with real breakage risk and
-  no user-visible benefit. Do it as its own task if ever wanted.
+## Canonical reading order
 
-## Architecture in one paragraph
+1. `ARCHITECTURE.md`
+2. `GUEST-PLATFORM.md`
+3. `VALIDATION.md`
+4. `../STATUS-AND-REWORK.md`
+5. `LIMITATIONS.md`
 
-iOS forbids real `fork`/`exec` at the OS level. Tether runs a **guest Linux platform**
-(Alpine + Blink) as the primary terminal: **`apk add` installs real ELFs; default exec is
-always guest**. Two **generic** host bridges only: (1) URL opener class for `xdg-open`/
-`open` — any https URL; (2) manifest-listed host runtimes for app stubs (node/npm/claude)
-that are not guest binaries. Embedded Node CLIs use `@tether/shim` → generic spawn/PATH —
-not per-app hardcoding. See **`docs/GUEST-PLATFORM.md`** for the full contract.
-
-Internal modules may still be named `TermX*`; the product name is **Tether**.
-
-**Docs:** `GUEST-PLATFORM.md` · `00-MASTER-PLAN.md` · `agent-briefs/` for offline component work
-
-## Hard-won rules (breaking these has broken the app before)
-
-1. **No `Process`, `fork`, `exec`, `system`, or `tar` binary** — none exist on iOS. Host-only
-   code goes behind `#if os(macOS)`.
-2. **Everything shares one process.** A stray signal or `exit()` kills the whole app.
-   `SignalPolicy.installOnce()` ignores SIGPIPE — never remove it.
-3. **Never block the main thread**, and never close a pty/pipe fd while another thread is
-   blocked reading it. Drain first (see `TerminalSession.shutdownPTY`).
-4. **A terminal never sends EOF.** Never read stdin to EOF unless `isatty()` is false —
-   this froze the shell twice.
-5. **`DispatchWorkItem.cancel()` cannot interrupt a blocked `read()`.** Use a poll loop with
-   a stop flag (see `NodeMobileRuntime.StdinPump`).
-6. **Each `ShellSession` owns its own `CommandRegistry`.** Registering a command or fallback
-   on the engine's registry does *not* affect interactive sessions — wire it in
-   `sessionConfigurator` too.
-7. **Guard index arithmetic.** `0..<(count - 2)` crashed the app on any one-word command.
-8. Do not change the frozen APIs in `09-integration-contracts.md`.
-
-## Bugs already found and fixed — do not reintroduce
-
-Documented in `../STATUS-AND-REWORK.md`. In short: SIGWINCH treated as an interrupt (any
-resize killed the shell); unhandled SIGPIPE; pty close hanging the main thread; filters
-ignoring piped stdin; `ScriptParser` underflow on short lines; Node's stdin pump swallowing
-all input after a job; the external-command adapter slurping a tty to EOF; `printf` never
-writing its output; backslashes stripped inside double quotes; script variables invisible
-to later expansions.
-
-## Current state (2026-08-24)
-
-Simulator-verified: Alpine login shell, `apk add`, manifest host stubs (`node`/`claude`/`open`),
-double-^C cancel, copy diagnostic log, in-app OAuth Safari (spawn opener primary path in progress).
-
-**Active work:** see `13-parallel-agent-plan.md` — ios-linuxkit-class Linux engine, full
-native command tier, WASM, terminal TUI fixes, Claude login e2e, device pass.
-
-## Where to look
-
-| Question | File |
-|---|---|
-| What is the guest platform contract? | `GUEST-PLATFORM.md` |
-| How do I run and test it? | `../HOW-TO-RUN.md` |
-| What can users type, and how do they install/remove things? | `USER-GUIDE.md` |
-| What is verified working, and what bugs were fixed? | `../STATUS-AND-REWORK.md` |
-| What work is left, for a Mac agent? | `10-remaining-work.md`, `agent-briefs/I1–I3` |
-| What work can an agent without the repo do? | `agent-briefs/P1–P12` |
-| The frozen APIs between components | `09-integration-contracts.md` |
-| Licensing rules for new dependencies | `07-appstore-licensing.md` |
-| Physical-device checklist | `DEVICE-PASS.md` |
-
-## Repo conventions
-
-- Build with `xcodegen generate` then `xcodebuild -project Tether.xcodeproj -scheme Tether …`.
-  `Tether.xcodeproj` is generated — edit `project.yml`, not the project file.
-- The three xcframeworks (~708 MB) are **not** committed; rebuild them with the scripts in
-  `Frameworks/README.md`.
-- Every change should keep all test suites green; see `../HOW-TO-RUN.md` for the commands.
-
-## Claude Code sessions (why they live where they do)
-
-Claude Code binds a session to the directory it was started in, and stores that project's
-transcripts and memory under `~/.claude/projects/<path-with-dashes>/`. When the repo moved
-from `~/Projects/terminal` to `~/Projects/tether`, the session data was copied across:
-
-```
-~/.claude/projects/-Users-<you>-Projects-terminal/   # old
-~/.claude/projects/-Users-<you>-Projects-tether/     # new (copy of the above)
-```
-
-So a session started in the new folder sees the same memory and can `--resume` the old
-conversations. If you ever move the repo again, copy the matching project folder the same
-way, and re-sync after quitting Claude so the final part of the transcript is included:
-
-```bash
-rsync -a ~/.claude/projects/-Users-<you>-Projects-OLD/ \
-         ~/.claude/projects/-Users-<you>-Projects-NEW/
-```
-
-The old empty `~/Projects/terminal` folder can be deleted once no session is running in it.
+The P1–P12 agent briefs and transfer folder were integration inputs, not ongoing
+product documentation. Their completed components now live under `External/`
+and `Vendor/` and are covered by the aggregate validation gate.

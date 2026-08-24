@@ -157,4 +157,33 @@ final class TermXCommandsTests: XCTestCase {
         let r = PrintenvCommand.run(io(["printenv", "NO_SUCH_VAR"], env: [:]))
         XCTAssertEqual(r.exitCode, 1)
     }
+
+    func testMktempUsesCallerWorkingDirectoryAndCreatesFileAtomically() throws {
+        let root = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("tether-mktemp-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: root) }
+
+        let result = MktempCommand.run(io(["mktemp", "artifact.XXXXXX"], cwd: root))
+        XCTAssertEqual(result.exitCode, 0, result.stderr)
+        let path = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertTrue(path.hasPrefix(root + "/artifact."))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+    }
+
+    func testMktempDirectoryUsesSecurePermissions() throws {
+        let root = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("tether-mktemp-dir-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: root) }
+
+        let result = MktempCommand.run(io(["mktemp", "-d", "folder.XXXXXX"], cwd: root))
+        XCTAssertEqual(result.exitCode, 0, result.stderr)
+        let path = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+        let permissions = try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int
+        XCTAssertEqual(permissions.map { $0 & 0o777 }, 0o700)
+    }
 }

@@ -33,7 +33,6 @@ let package = Package(
             path: "Sources/TermXPython",
             resources: [
                 .process("Resources/registry.json"),
-                .process("Resources/wheel-index.json"),
             ],
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", macSliceDir,

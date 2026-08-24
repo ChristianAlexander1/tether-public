@@ -5,8 +5,7 @@ import Foundation
 /// Each command runs as a VirtualProcess: its own thread, cwd, environ, fds, exit code,
 /// and signal handler. This replaces fork/exec on iOS where those syscalls are forbidden.
 ///
-/// Design matches docs/02-shell-core.md §"Process model details" and the `termx_core.h`
-/// contract from docs/09-integration-contracts.md §2.1.
+/// In-process command state matching the public `termx_core.h` contract.
 public final class VirtualProcess: @unchecked Sendable {
     public let pid: TermXPID
     public private(set) var threadID: UInt64 = 0

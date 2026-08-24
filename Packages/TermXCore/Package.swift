@@ -8,6 +8,7 @@ let package = Package(
         .package(path: "../../External/TermXCommands"),
         .package(path: "../../External/TetherCommands"),
         .package(path: "../../External/TermXShellLang"),
+        .package(path: "../../External/TetherShellLang"),
     ],
     targets: [
         .target(
@@ -16,6 +17,9 @@ let package = Package(
             resources: [.process("Resources/registry.json")],
             publicHeadersPath: "include"
         ),
-        .testTarget(name: "TermXCoreTests", dependencies: ["TermXCore", "TermXShellLang"])
+        .testTarget(
+            name: "TermXCoreTests",
+            dependencies: ["TermXCore", "TermXShellLang", "TetherShellLang"]
+        )
     ]
 )

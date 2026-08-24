@@ -1,32 +1,23 @@
-# TermXClaude Handoff
+# TermXClaude runtime notes
 
-## Architecture (current)
+Claude Code’s packaged JavaScript is extracted from the real distribution and
+executed by Tether’s embedded Node engine. The launcher supplies the minimum
+Bun compatibility surface required by that distribution and preserves the
+normal `BROWSER=open`/child-process route.
 
-Modern Claude Code is a **Bun standalone ELF**. Under Blink it dies with **SIGILL**
-(exit 132) — same class as the skipped bun acceptance test. Docker-style containers
-cannot run on iOS (no Linux kernel to share).
+There is no Claude-specific PTY URL scraping or npm `open` replacement.
+Browser requests use the same generic command bridge as every other Node CLI.
+Older installed `termx-open-stub.js` files are removed during launcher refresh.
 
-**World approach we ship** (same idea as [qnx/claude-code-qnx](https://github.com/qnx/claude-code-qnx), Apache-2.0):
+`ClaudeRuntime.swift` owns installation/probing, `TermXClaude.swift` owns
+lifecycle and cancellation, and `Resources/launcher.js` plus `bun-shim.js`
+form the runtime adapter. Account-backed login remains a signed-device release
+gate, not a mocked completion claim.
 
-1. Download current `@anthropic-ai/claude-code-linux-*-*` (payload only)
-2. Extract embedded JS (`ClaudeBunExtractor`)
-3. Run via `node $HOME/claude/launcher.js` + `bun-shim.js` on NodeMobile
-
-Linux/Blink stays for Alpine `apk`, git, compilers — not for Bun/Claude.
-
-## Files
-
-| Path | Role |
-|---|---|
-| `ClaudeRuntime.swift` | Probe, Bun extract, Node installer |
-| `TermXClaude.swift` | Service / launcher lifecycle |
-| `Resources/launcher.js` | Node entry + `/$bunfs/` stubs |
-| `Resources/bun-shim.js` | `global.Bun` polyfill |
-| `Resources/NOTICE-claude-bun-bridge.txt` | Apache attribution |
-
-## Tests
-
+```sh
+cd Packages/TermXClaude
+swift test
 ```
-cd Packages/TermXClaude && swift test
-# 10 tests, 0 failures (host extract of 2.1.241 → `2.1.241 (Claude Code)` verified)
-```
+
+See `docs/ARCHITECTURE.md`, `docs/VALIDATION.md`, and the bundled attribution
+notice for the current contract.

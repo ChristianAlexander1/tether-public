@@ -2,7 +2,7 @@
 
 ## Implemented surface
 
-TermXUI delivers C1 (terminal UI) against the frozen `TerminalEngine` protocol in `docs/09-integration-contracts.md` §2.2.
+TermXUI implements the terminal UI and `TerminalEngine` boundary described in `docs/ARCHITECTURE.md`.
 
 | Component | Status |
 |---|---|
@@ -19,7 +19,7 @@ TermXUI delivers C1 (terminal UI) against the frozen `TerminalEngine` protocol i
 Requires **Xcode 16+**, **iOS 16+ Simulator** (or device). SwiftTerm 1.20.0 requires enabling its SPM build plugin on first open (`-skipPackagePluginValidation` for CI) and the Metal Toolchain component for iOS Simulator builds.
 
 ```sh
-cd TermX/Packages/TermXUI
+cd Packages/TermXUI
 xcodebuild -scheme TermXUI \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
   -skipPackagePluginValidation \

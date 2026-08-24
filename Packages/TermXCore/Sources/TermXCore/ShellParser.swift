@@ -403,7 +403,10 @@ public enum VariableExpander {
                 if chars[i] == "?" { result.append(String(lastExitCode)); i += 1; continue }
                 if chars[i] == "$" { result.append(String(shellPID)); i += 1; continue }
                 if chars[i] == "!" { result.append(String(lastBgPID)); i += 1; continue }
-                if chars[i] == "#" { result.append("0"); i += 1; continue } // Placeholder for $#
+                // This lightweight expander runs at the top-level shell, where
+                // there are no positional parameters. Function/script
+                // positionals are handled by TermXShellLang.
+                if chars[i] == "#" { result.append("0"); i += 1; continue }
 
                 // ${VAR} or ${VAR:-default}
                 if chars[i] == "{" {

@@ -17,7 +17,7 @@ Recorded in `VERSIONS.upstream` after running the build script.
 ### 1. Fetch `TermXPython.xcframework` (~240MB, not committed)
 
 ```bash
-cd TermX/Packages/TermXPython
+cd Packages/TermXPython
 ./Scripts/build-termx-python-xcframework.sh
 ```
 
@@ -32,7 +32,7 @@ Override tag: `TERMX_PYTHON_SUPPORT_TAG=3.14-b10 ./Scripts/build-termx-python-xc
 ### 2. Build Swift package
 
 ```bash
-cd TermX/Packages/TermXPython
+cd Packages/TermXPython
 swift build
 ```
 
@@ -44,7 +44,7 @@ swift build
 TERMX_IOS_SIM_DEST='platform=iOS Simulator,name=iPhone 17,OS=26.3.1' ./Scripts/run-acceptance-tests.sh
 ```
 
-Tests read the host-side xcframework path (`TERMX_PYTHON_ROOT`) — valid on Simulator; production app must bundle stdlib (see below).
+Tests read the host-side xcframework path (`TETHER_PYTHON_ROOT`; legacy `TERMX_PYTHON_ROOT` remains accepted) — valid on Simulator; production app bundles the standard library.
 
 ## Architecture
 
@@ -61,28 +61,24 @@ TermXPython (Swift)
 
 ## Registry (`Resources/registry.json`)
 
-Schema matches docs/09 §2.5:
+The registry uses the same command-manifest fields as the host dispatcher:
 
 ```json
 { "name": "python3", "kind": "native", "entry": "termx_python_run", "framework": "TermXPython" }
 { "name": "pip",     "kind": "native", "entry": "termx_python_run", "framework": "TermXPython" }
 ```
 
-## Wheel index plan
-
-See `Resources/wheel-index.json`. Summary:
+## Package installation
 
 - **Pure Python**: PyPI (`https://pypi.org/simple`) — works today (`requests`, `rich`, etc.)
-- **Binary wheels (PEP 730 `ios_*`)**: host at `https://wheels.termx.dev/ios/simple/` (build with [mobile-forge](https://github.com/beeware/mobile-forge))
-- **Fallback community index**: a-Shell aarch64 iOS index (BSD)
-
-Example: `pip install --index-url https://wheels.termx.dev/ios/simple/ --extra-index-url https://pypi.org/simple cryptography`
+- **Binary wheels (PEP 730 `ios_*`)**: pass a real deployed PEP 503 endpoint to `PythonWheelIndex.pipInstallArgs`; no placeholder Tether service is advertised
+- **Optional community source**: the a-Shell aarch64 iOS index (BSD)
 
 ## App integrator checklist
 
 1. Link `TermX/Frameworks/TermXPython.xcframework` in the app target (Embed & Sign).
 2. Copy `TermXPython.xcframework/lib/python3.14` → App bundle `Resources/python/lib/python3.14` (Briefcase pattern) **or** set `termx_python_set_stdlib_path()` to the bundled path at launch.
-3. Set `TERMX_PYTHON_ROOT` only for Simulator/dev — not required on device if stdlib is bundled.
+3. Set `TETHER_PYTHON_ROOT` only for Simulator/dev — not required on device if stdlib is bundled.
 4. Merge `registry.json` into C2 manifest loader.
 
 ## Acceptance test results (2026-08-22, iPhone 17 Simulator, iOS 26.3.1)
@@ -98,7 +94,7 @@ Test Suite 'PythonTests' passed — Executed 6 tests, with 0 failures (0 unexpec
 ** TEST SUCCEEDED **
 ```
 
-Covers docs/09 §3 C4a:
+The suite covers:
 
 | Requirement | Test |
 |---|---|

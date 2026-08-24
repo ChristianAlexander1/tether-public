@@ -28,13 +28,11 @@ public final class CopyLogDiagnostics: @unchecked Sendable {
     }
 
     public static let browserChecklist = """
-    Claude login expects (in Browser/open debug below):
-      1. claude.openStub: yes (npm `open` package stub)
-      2. which open -> /usr/bin/open OR node spawn open / spawn url-in-args
-      3. open oauthLogin https://claude.com/…
-      4. in-app Safari presented for claude.com
-      Fallback: auto-open Claude OAuth when URL prints in terminal
-    If step 1–3 missing but auto-open runs, complete login in Safari and paste the code.
+    Browser integration expects (in Browser/open debug below):
+      1. a standard opener command such as open or xdg-open
+      2. a complete http(s) URL or a workspace path
+      3. generic child-process dispatch to SystemOpen
+      4. an in-app Safari or document presentation result
     """
 
     public func diagnosticHeader(sessionLines: String) -> String {

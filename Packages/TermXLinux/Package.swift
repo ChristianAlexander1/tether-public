@@ -8,7 +8,8 @@ let blinkSrc = frameworksRoot.appendingPathComponent(".build/blink-src").path
 let blinkLib = frameworksRoot.appendingPathComponent(".build/blink/host/blink.a").path
 let blinkXCFrameworkURL = frameworksRoot.appendingPathComponent("Blink.xcframework")
 let blinkInclude = frameworksRoot.appendingPathComponent("include").path
-let linkBlink = Context.environment["TERMX_LINK_BLINK"] == "1"
+let linkBlink = (Context.environment["TETHER_LINK_BLINK"]
+    ?? Context.environment["TERMX_LINK_BLINK"]) == "1"
 let hasBlinkXCFramework = FileManager.default.fileExists(atPath: blinkXCFrameworkURL.path)
 
 var bridgeSettings: [CSetting] = [
@@ -31,7 +32,7 @@ if hasBlinkXCFramework {
     )
     bridgeDeps.append("BlinkBinary")
     // Real bridge on iOS (linked against Blink.xcframework). macOS package tests keep
-    // the stub unless TERMX_LINK_BLINK=1 (host blink.a + HostBlinkRuntime path).
+    // the unavailable bridge unless TETHER_LINK_BLINK=1 (host blink.a + HostBlinkRuntime path).
     bridgeSettings += [
         .define("TERMX_BLINK_STUB", .when(platforms: [.macOS])),
         .unsafeFlags([

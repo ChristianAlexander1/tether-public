@@ -36,6 +36,7 @@ final class LinuxTests: XCTestCase {
         XCTAssertEqual(env["USER"], "root")
         XCTAssertEqual(env["SHELL"], "/bin/sh")
         XCTAssertEqual(env["BROWSER"], "open")
+        XCTAssertNil(env["HOSTNAME"])
         XCTAssertNil(env["GIT_AUTHOR_NAME"])
         XCTAssertNil(env["GIT_EDITOR"])
         XCTAssertNil(env["EMAIL"])
@@ -58,8 +59,39 @@ final class LinuxTests: XCTestCase {
         XCTAssertTrue(manifest.isBrowserOpener("xdg-open"))
         XCTAssertEqual(manifest.hostHandler(for: "node"), "node-mobile")
         XCTAssertNil(manifest.hostHandler(for: "git"))
-        XCTAssertTrue(manifest.stubBasenames.contains("claude"))
+        XCTAssertTrue(manifest.launcherBasenames.contains("claude"))
         XCTAssertEqual(manifest.hostHandler(for: "wasm"), "wasm3")
-        XCTAssertFalse(manifest.stubBasenames.contains("git"))
+        XCTAssertFalse(manifest.launcherBasenames.contains("git"))
+    }
+
+    func testRuntimeLaunchersMigrateOnlyGeneratedBusyBoxCopies() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tether-launchers-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("bin", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let busybox = root.appendingPathComponent("bin/busybox")
+        try Data("real-busybox-fixture".utf8).write(to: busybox)
+        let bin = root.appendingPathComponent("usr/local/bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: busybox, to: bin.appendingPathComponent("node"))
+        try Data("user-owned-command".utf8).write(to: bin.appendingPathComponent("custom"))
+
+        try GuestRuntimeLauncherInstaller.install(names: ["node", "custom", "wasm"], rootfs: root)
+
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: bin.appendingPathComponent("node").path),
+            "../../../bin/busybox"
+        )
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: bin.appendingPathComponent("wasm").path),
+            "../../../bin/busybox"
+        )
+        XCTAssertEqual(
+            try String(contentsOf: bin.appendingPathComponent("custom"), encoding: .utf8),
+            "user-owned-command"
+        )
     }
 }

@@ -10,6 +10,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
         .package(path: "../TermXFiles"),
+        .package(path: "../../External/TetherTerminal"),
     ],
     targets: [
         .target(
@@ -21,6 +22,14 @@ let package = Package(
             path: "Sources/TermXUI",
             resources: [.process("Resources")]
         ),
-        .testTarget(name: "TermXUITests", dependencies: ["TermXUI", .product(name: "SwiftTerm", package: "SwiftTerm")], path: "Tests/TermXUITests")
+        .testTarget(
+            name: "TermXUITests",
+            dependencies: [
+                "TermXUI",
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
+                .product(name: "TetherTerminal", package: "TetherTerminal"),
+            ],
+            path: "Tests/TermXUITests"
+        )
     ]
 )

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Runs C4a acceptance tests on iOS Simulator (docs/09 §3).
+# Runs the Python acceptance tests on iOS Simulator.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 PKG="$ROOT/Packages/TermXPython"
-export TERMX_PYTHON_ROOT="$ROOT/Frameworks/TermXPython.xcframework"
+export TETHER_PYTHON_ROOT="$ROOT/Frameworks/TermXPython.xcframework"
 
 "$PKG/Scripts/build-termx-python-xcframework.sh"
 

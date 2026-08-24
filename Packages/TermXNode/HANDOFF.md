@@ -1,69 +1,33 @@
-# TermXNode Handoff (C4b)
+# TermXNode runtime notes
 
-## Implemented
+TermXNode embeds nodejs-mobile and serializes jobs through one persistent
+engine. Host tests use the installed system Node with the same preload and
+Unix-socket child-process protocol.
 
-| Item | Status |
-|---|---|
-| Frozen `NodeService` protocol | ✅ unchanged |
-| `EmbeddedNodeService` serialized job queue | ✅ `DispatchQueue` single-flight |
-| `interrupt()` → SIGINT to running job | ✅ host runtime; iOS forwards to NodeMobile thread |
-| stdio/tty bridge | ✅ fd redirect + `TERMX_INTERACTIVE` → shim `tty.isatty` |
-| `@termx/shim` preload package | ✅ Delivered shim from `External/termx-shim` + `ensure-ipc.mjs` |
-| Spawn IPC → TermXCore | ✅ `RegistrySpawnExecutor` + `NodeSpawnBridge` (Unix socket on host, fd IPC on iOS) |
-| `registry.json` (`node`, `npm`) | ✅ `Sources/TermXNode/Resources/registry.json` |
-| `NodeMobile.xcframework` | ✅ `Vendor/NodeMobile.xcframework` + `NodeMobileBridge` (`termx_node_launch`) |
+## Platform behavior
 
-## Build scripts
+- `@tether/shim` is developed and tested in `External/tether-shim` and copied
+  into this package’s resources.
+- `child_process` requests are delegated to `SpawnExecuting`; the bridge does
+  not probe iOS host paths for guest commands.
+- standard opener commands use `SystemOpen` for any application and URL.
+- `os` forwards Node’s native platform, CPU, memory, user, network and kernel
+  data. Session `HOME`/`TMPDIR` are the only path adaptations.
+- `tty.isatty` reflects the real job descriptor mode supplied by Swift.
+- new IPC/job environment keys use `TETHER_*`; legacy `TERMX_*` keys remain
+  accepted for compatibility.
 
-```bash
-# Fetch official nodejs-mobile iOS xcframework (MIT, ~49MB download)
-./TermX/Frameworks/build-nodejs-mobile.sh
+The iOS engine starts with `--jitless`, because iOS does not permit writable
+executable memory. `process.title` is virtualized so a JavaScript assignment
+cannot corrupt nodejs-mobile’s process-wide host state.
 
-# Run acceptance tests (macOS host Node + shim; records termx_spawn via test double)
-cd TermX/Packages/TermXNode && swift test
+## Verify
+
+```sh
+cd External/tether-shim && npm test
+cd Packages/TermXNode && swift test
 ```
 
-Outputs:
-- `Frameworks/NodeMobile.xcframework` (ios-arm64 + ios-arm64-simulator; digidem lite)
-- `TermX/Frameworks/include/node` (headers)
-
-Upstream pin: **digidem/nodejs-mobile v24.19.0-1 lite** — https://github.com/digidem/nodejs-mobile/releases/tag/v24.19.0-1
-(Lineage: nodejs-mobile; official org stopped at v18.20.4 / V8 10.2)
-
-## Test results (2026-08-22, macOS arm64, after T1/T8)
-
-```
-Test Suite 'NodeTests' passed — 9 tests, 0 failures
-  testNodeEvalPrintsTwo                              PASS
-  testShimRoutesPostinstallThroughSpawnRecorder      PASS
-  testInterruptReturnsNonZero                        PASS
-  (+ registry/shim metadata/os/tty/queue tests)      PASS
-```
-
-External `termx-shim`: **48 pass** (`cd TermX/External/termx-shim && npm test`)
-
-### docs/09 §3 C4b checklist
-
-| Acceptance test | Result |
-|---|---|
-| `node -e 'console.log(1+1)'` | ✅ PASS |
-| `npm init -y && npm i chalk lodash express` + require | ⏳ manual (needs network + `$HOME/node` layout on device) |
-| Shim proof: postinstall shell script → `termx_spawn` recorder | ✅ PASS (`testShimRoutesPostinstallThroughSpawnRecorder`) |
-| SIGINT interrupts spin loop | ✅ PASS |
-
-## Architecture notes
-
-- **Host (macOS tests / dev):** `HostNodeRuntime` spawns system Node with `--import ensure-ipc.mjs --require @termx/shim`; IPC via Unix domain socket (`TERMX_IPC_SOCKET`).
-- **iOS production:** `NodeMobileRuntime` calls `termx_node_launch()` once on an 8 MiB-stack thread with `bootstrap.js` + shim preload. Jobs posted on `TERMX_JOB_FD`; spawn IPC uses `TERMX_IPC_SOCKET` per job.
-- **`@termx/shim` location:** bundled at `Bundle.module/shim/` → `index.js`, loaded via `NODE_OPTIONS`.
-
-## Known limitations / integrator follow-ups
-
-1. **npm e2e on iOS Simulator/device** not run here — requires `xcodebuild` app run + network. Host tests prove shim + spawn routing; embedded engine wiring is in `NodeMobileRuntime`.
-2. **Native Node addon / node-gyp** unsupported (v1 scope).
-3. **NodeMobile SPM slice:** iOS-only binary target; macOS `swift test` uses `HostNodeRuntime` fallback.
-4. **Socket path length:** IPC socket uses `/tmp/termx-<uuid>.sock` (macOS `sun_path` limit).
-
-## License
-
-nodejs-mobile / Node.js — MIT. See `TermX/NOTICES/nodejs-mobile-MIT.txt`.
+NodeMobile.xcframework is produced by `Frameworks/build-nodejs-mobile.sh` and
+is ignored by Git. See `docs/ARCHITECTURE.md` and `docs/LIMITATIONS.md` for the
+guest/host boundary.

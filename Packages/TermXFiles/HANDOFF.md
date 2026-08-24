@@ -5,7 +5,7 @@
 ## Implemented Surface
 
 TermXFiles provides the complete C3 filesystem boundary described by the TermX integration
-contracts (docs/09-integration-contracts.md §2.3).
+contracts described in `docs/ARCHITECTURE.md`.
 
 ### Frozen API (preserved exactly)
 
@@ -52,7 +52,7 @@ contracts (docs/09-integration-contracts.md §2.3).
 - `addWorkspace()` creates security-scoped bookmark, persists, then stops picker-granted access
 - Presents from foreground-active scene's topmost view controller (handles nested modals)
 
-## C3 Acceptance Criteria (docs/09 §3)
+## Files/workspace acceptance criteria
 
 | Criterion | Status | Evidence |
 |-----------|--------|----------|
@@ -66,7 +66,7 @@ contracts (docs/09-integration-contracts.md §2.3).
 
 ```sh
 # Swift package tests (macOS CI — all 30 tests)
-cd TermX/Packages/TermXFiles && swift test
+cd Packages/TermXFiles && swift test
 
 # Xcode Simulator tests (full UIKit paths — optional)
 xcodebuild -scheme TermXFiles -destination 'platform=iOS Simulator,name=iPhone 16' test

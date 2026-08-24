@@ -288,7 +288,7 @@ final class CoreTests: XCTestCase {
         }
     }
 
-    // MARK: - C2 Acceptance Tests (docs/09-integration-contracts.md §3)
+    // MARK: - Host command-engine acceptance tests
 
     private final class OutputCapture {
         var text = ""

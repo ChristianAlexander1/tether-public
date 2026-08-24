@@ -53,7 +53,8 @@ final class ClaudeTests: XCTestCase {
         let env = ClaudeCodeService.launchEnvironment(base: [:])
         XCTAssertEqual(env["DISPLAY"], ":0")
         XCTAssertEqual(env["BROWSER"], "open")
-        XCTAssertEqual(env["WAYLAND_DISPLAY"], "termx")
+        XCTAssertEqual(env["WAYLAND_DISPLAY"], "tether")
+        XCTAssertEqual(env["TETHER_INTERACTIVE"], "1")
     }
 
     func testExecuteUsesNodeLauncherWhenExtractedInstallPresent() async throws {

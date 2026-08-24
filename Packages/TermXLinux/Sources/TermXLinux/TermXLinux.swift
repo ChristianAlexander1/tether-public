@@ -2,7 +2,7 @@ import Foundation
 import TermXCore
 import TermXBlinkBridge
 
-// MARK: - Frozen Linux guest protocol (docs/06-linux-emulation.md)
+// MARK: - Linux guest service protocol
 
 public protocol LinuxGuestRuntime: AnyObject {
     func bootstrap() async throws
@@ -113,7 +113,7 @@ public enum AlpineBootstrap {
     }
 }
 
-// MARK: - Fallback registration (09-integration-contracts.md §2.1)
+// MARK: - Fallback registration
 
 public enum LinuxFallback {
     public static func register(into registry: CommandRegistry, service: BlinkLinuxService) {

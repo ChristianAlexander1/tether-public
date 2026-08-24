@@ -62,7 +62,7 @@
 		A3C92134B3E7A5BF8C3A460D /* TermXClaude */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXClaude; path = Packages/TermXClaude; sourceTree = SOURCE_ROOT; };
 		A471776D23739CB33A7D1C45 /* TermXIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TermXIntegration.swift; sourceTree = "<group>"; };
 		B744DD409A97EBA596458FC3 /* TetherApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TetherApp.swift; sourceTree = "<group>"; };
-		C2487BACDA2EB50E74CE6545 /* TetherWasm */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TetherWasm; path = TetherWasm; sourceTree = SOURCE_ROOT; };
+		C2487BACDA2EB50E74CE6545 /* TetherWasm */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TetherWasm; path = External/TetherWasm; sourceTree = SOURCE_ROOT; };
 		CEC344C64C4F792976756B1E /* TermXLinux */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXLinux; path = Packages/TermXLinux; sourceTree = SOURCE_ROOT; };
 		D039FC37EA04581221A1AE9F /* SwiftTerm-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "SwiftTerm-MIT.txt"; sourceTree = "<group>"; };
 		EDCFA4C9A1DF10C2D3AA1EBD /* LicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
@@ -259,7 +259,7 @@
 				3EBBAA98AE99F9DAAD8BCB95 /* XCLocalSwiftPackageReference "Packages/TermXNode" */,
 				B6FF80F2E824FFF1D38FB554 /* XCLocalSwiftPackageReference "Packages/TermXPython" */,
 				E5F19B305EEE9324479AD77B /* XCLocalSwiftPackageReference "Packages/TermXUI" */,
-				0CEF71059B0CD6C56B3D0C9C /* XCLocalSwiftPackageReference "TetherWasm" */,
+				03022F8B8F00B213930A88FC /* XCLocalSwiftPackageReference "External/TetherWasm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B69029C48B0586990A516091 /* Products */;
@@ -569,9 +569,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		0CEF71059B0CD6C56B3D0C9C /* XCLocalSwiftPackageReference "TetherWasm" */ = {
+		03022F8B8F00B213930A88FC /* XCLocalSwiftPackageReference "External/TetherWasm" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = TetherWasm;
+			relativePath = External/TetherWasm;
 		};
 		3EBBAA98AE99F9DAAD8BCB95 /* XCLocalSwiftPackageReference "Packages/TermXNode" */ = {
 			isa = XCLocalSwiftPackageReference;

@@ -46,7 +46,27 @@ final class NodeSpawnBridgeTests: XCTestCase {
         XCTAssertEqual(recorder.records.first?.file, "sh")
     }
 
-    func testWhichOpenReturnsVirtualPath() throws {
+    func testGuestStylePathIsResolvedByExecutorNotHostFilesystem() throws {
+        let executor = RecordingSpawnExecutor()
+        let bridge = NodeSpawnBridge(executor: executor)
+        let request: [String: Any] = [
+            "kind": "spawnSync",
+            "file": "future-package-command",
+            "args": ["--version"],
+            "env": ["PATH": "/usr/local/bin:/usr/bin:/bin"],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: request)
+
+        _ = bridge.handle(
+            requestData: data,
+            stdinFD: -1, stdoutFD: -1, stderrFD: -1,
+            defaultCWD: "/work", defaultEnv: [:], interactive: false
+        )
+
+        XCTAssertEqual(executor.records.last?.file, "future-package-command")
+    }
+
+    func testWhichOpenReturnsInstalledGuestLauncherPath() throws {
         let recorder = RecordingSpawnExecutor()
         let bridge = NodeSpawnBridge(executor: recorder)
         let req: [String: Any] = [
@@ -63,7 +83,35 @@ final class NodeSpawnBridgeTests: XCTestCase {
         let line = String(data: replyData.dropLast(), encoding: .utf8)!
         let reply = try JSONSerialization.jsonObject(with: Data(line.utf8)) as! [String: Any]
         XCTAssertEqual(reply["exitCode"] as? Int, 0)
-        XCTAssertEqual((reply["stdout"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), "/usr/bin/open")
+        XCTAssertEqual((reply["stdout"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), "/usr/local/bin/open")
         XCTAssertTrue(recorder.records.isEmpty)
     }
+
+    func testExit127UsesNodeENOENTContract() throws {
+        let bridge = NodeSpawnBridge(executor: Exit127SpawnExecutor())
+        let data = try JSONSerialization.data(withJSONObject: [
+            "op": "spawnSync",
+            "file": "not-installed",
+            "args": [],
+        ])
+        let replyData = bridge.handle(
+            requestData: data,
+            stdinFD: -1, stdoutFD: -1, stderrFD: -1,
+            defaultCWD: "/work", defaultEnv: [:], interactive: false
+        )
+        let reply = try JSONSerialization.jsonObject(with: replyData.dropLast()) as! [String: Any]
+        XCTAssertEqual(reply["ok"] as? Bool, false)
+        XCTAssertEqual(reply["code"] as? String, "ENOENT")
+        XCTAssertTrue(reply["exitCode"] is NSNull)
+    }
+}
+
+private final class Exit127SpawnExecutor: SpawnExecuting {
+    func spawnSync(file: String, args: [String], cwd: String, env: [String: String],
+                   stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
+                   interactive: Bool) -> SpawnResult {
+        SpawnResult(pid: VirtualChildPID.next(), exitCode: 127, stdout: "", stderr: "")
+    }
+
+    func signal(pid: Int32, signal: Int32) {}
 }

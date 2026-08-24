@@ -34,7 +34,9 @@ protocol NodeRuntime: AnyObject {
 enum NodeRuntimeFactory {
     static func make(spawnExecutor: SpawnExecuting) -> NodeRuntime {
         #if os(macOS) && !targetEnvironment(simulator)
-        if ProcessInfo.processInfo.environment["TERMX_FORCE_HOST_NODE"] != "0" {
+        let forceHost = ProcessInfo.processInfo.environment["TETHER_FORCE_HOST_NODE"]
+            ?? ProcessInfo.processInfo.environment["TERMX_FORCE_HOST_NODE"]
+        if forceHost != "0" {
             return HostNodeRuntime(spawnExecutor: spawnExecutor)
         }
         #endif
@@ -48,7 +50,8 @@ enum NodeRuntimeFactory {
 
 enum NodeMobilePaths {
     static var xcframeworkRoot: String {
-        ProcessInfo.processInfo.environment["TERMX_NODE_MOBILE_XCFRAMEWORK"]
+        ProcessInfo.processInfo.environment["TETHER_NODE_MOBILE_XCFRAMEWORK"]
+            ?? ProcessInfo.processInfo.environment["TERMX_NODE_MOBILE_XCFRAMEWORK"]
             ?? defaultXCFrameworkRoot
     }
 

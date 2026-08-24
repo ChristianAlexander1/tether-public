@@ -44,18 +44,26 @@ struct MktempCommand: TermXCommand {
 
     static func run(_ io: CommandIO) -> CommandResult {
         var dir = false
+        var useTemporaryDirectory = false
         var template: String?
         var i = 1
         var rest = false
         while i < io.argv.count {
             let a = io.argv[i]
             if !rest && a == "--" { rest = true }
-            else if !rest && (a == "-d") { dir = true }
-            else if !rest && a.hasPrefix("-t") { dir = false }
+            else if !rest && a == "-d" { dir = true }
+            else if !rest && a == "-t" { useTemporaryDirectory = true }
             else { template = a }
             i += 1
         }
-        let tpl = template ?? "/tmp/tmp.XXXXXX"
+        var tpl = template ?? "tmp.XXXXXX"
+        if useTemporaryDirectory || template == nil {
+            let tempRoot = io.environment["TMPDIR"] ?? NSTemporaryDirectory()
+            if !tpl.hasSuffix("XXXXXX") { tpl += ".XXXXXX" }
+            tpl = (tempRoot as NSString).appendingPathComponent(tpl)
+        } else if !tpl.hasPrefix("/") {
+            tpl = (io.cwd as NSString).appendingPathComponent(tpl)
+        }
         guard let result = makeTemp(template: tpl, isDir: dir) else {
             return CommandSupport.error(io, "failed to create \(dir ? "directory" : "file")")
         }
@@ -63,32 +71,18 @@ struct MktempCommand: TermXCommand {
     }
 
     private static func makeTemp(template: String, isDir: Bool) -> String? {
-        var tpl = template
-        if tpl.hasPrefix("/tmp/") || tpl.contains("/") {
-            // keep as is
-        } else if tpl.hasPrefix("tmp.XXXXXX") {
-            tpl = "/tmp/" + tpl
-        }
-        guard let range = tpl.range(of: "XXXXXX") else { return nil }
-        for _ in 0..<100 {
-            var hex = ""
-            for _ in 0..<6 {
-                hex += String(UInt32.random(in: 0..<16), radix: 16)
-            }
-            let name = tpl.replacingCharacters(in: range, with: hex)
+        guard template.hasSuffix("XXXXXX") else { return nil }
+        var buffer = Array(template.utf8CString)
+        return buffer.withUnsafeMutableBufferPointer { chars in
+            guard let base = chars.baseAddress else { return nil }
             if isDir {
-                do {
-                    try FileManager.default.createDirectory(atPath: name, withIntermediateDirectories: false,
-                                                            attributes: [.posixPermissions: 0o700])
-                    return name
-                } catch { continue }
+                guard mkdtemp(base) != nil else { return nil }
             } else {
-                if FileManager.default.createFile(atPath: name, contents: nil, attributes: nil) {
-                    return name
-                }
-                continue
+                let fd = mkstemp(base)
+                guard fd >= 0 else { return nil }
+                _ = close(fd)
             }
+            return String(cString: base)
         }
-        return nil
     }
 }

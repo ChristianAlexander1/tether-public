@@ -1,53 +1,26 @@
-# Tether physical-device pass
+# Physical-device release pass
 
-Manual checklist for a real iPhone/iPad. Automated package tests cover logic; this pass confirms sandbox, security-scoped bookmarks, and UI on device.
+Record device model, iOS version, app version/build, commit, tester and date.
 
-Mark each item `[x]` when verified. Record device model, iOS version, and build in the notes section.
+## Required checks
 
-## Environment
+- Add an On My iPhone folder; read, create, rename and delete a test file.
+- Force-quit and relaunch; confirm the bookmark reopens without another picker.
+- Repeat workspace open/close 100 times and confirm security-scope access stays balanced.
+- Repeat with an iCloud folder containing an evicted file and confirm download/read succeeds.
+- Install unrelated packages in one session: Git, Python, ripgrep and build-base.
+- Run a pipeline, a background job, Ctrl-C on `sleep 30`, then another command.
+- Run Node with redirected output and confirm the file contains only requested bytes.
+- Open a generic HTTPS URL from Alpine and from Node.
+- Complete real Claude account login, exit with double Ctrl-C, and start it again.
+- Create/edit a workspace file from the CLI and inspect it in Files.
+- Change terminal font size, rotate the device, use hardware/software keyboards,
+  paste at least 10 KB and exercise VoiceOver labels on app chrome.
+- Observe memory during package installation, Node/Claude use and terminal flood;
+  confirm no jetsam termination or unbounded growth.
+- Verify the Licenses and Storage screens match the archived build.
 
-- Device:
-- iOS:
-- TermX build / commit:
-- Tester:
-- Date:
+## Result
 
-## Checklist
-
-### Bookmark persistence across relaunch
-
-1. Launch TermX → **Add Folder** → pick a folder (On My iPhone or iCloud Drive).
-2. Confirm the workspace opens and `ls` lists contents.
-3. Force-quit TermX (app switcher → swipe away).
-4. Relaunch.
-5. **Pass:** workspace still opens without re-picking; files remain readable/writable.
-
-### iCloud-evicted file download
-
-1. Pick an **iCloud Drive** folder as the workspace.
-2. Ensure a file in that folder shows the cloud download icon in Files (evicted / not local), or add a file from another device and wait for Optimize Storage eviction.
-3. In TermX: `cat` (or open) that file path under the workspace.
-4. **Pass:** content appears after a short download; no permanent access / I/O failure.
-
-### Security-scope leak check (100 open/close)
-
-1. With a workspace selected, repeatedly leave and re-enter it (or open/close the bound session) **100 times**, or at least 20 rapid cycles if 100 is impractical, then spot-check with Instruments.
-2. After the cycles, run a simple read/write (`ls`, `echo hi > …`, `cat …`).
-3. **Pass:** no `accessDenied` / scope failures; app stays responsive. Prefer Instruments → File Activity with no growing security-scope leak warnings.
-4. Automated counterpart (macOS CI): `testAccessScopeBalancedAfter100Cycles` in TermXFiles.
-
-### Tabs / multi-window
-
-- **Tabs:** multiple terminal tabs are not shipped in this build — N/A until C1 tabs land (`docs/01-terminal-ui.md`).
-- **iPad multi-window:** multi-scene / side-by-side folders are not shipped — N/A until UIScene multi-window lands.
-- When either ships, re-run: two workspaces side by side, independent cwd/security scope, no cross-talk.
-
-### Font size (pinch if present)
-
-- Current UI exposes font size via the terminal toolbar menu **Stepper** (10–24 pt), not pinch-to-zoom.
-- **Pass:** open the `…` menu → change Font pt → glyphs resize immediately.
-- If pinch-to-zoom is added later, verify pinch in/out changes size smoothly without breaking selection or keyboard accessory.
-
-## Notes
-
-_(failures, screenshots, Instruments observations)_
+Do not mark this gate complete without a signed-device run. Record failures and
+links to logs/screenshots with the release evidence.

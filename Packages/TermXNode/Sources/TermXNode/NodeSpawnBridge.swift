@@ -71,11 +71,11 @@ final class NodeSpawnBridge {
             // Desktop programs commonly probe an opener with `which` before using it.
             let whichBase = (file as NSString).lastPathComponent
             if whichBase == "which", args.count == 1, SystemOpen.openerCommands.contains(args[0]) {
-                let path = "/usr/bin/\(args[0])"
-                SystemOpen.log("which \(args[0]) -> \(path) (virtual platform opener)")
+                let path = "/usr/local/bin/\(args[0])"
+                SystemOpen.log("which \(args[0]) -> \(path) (guest platform launcher)")
                 return Self.replyJSON([
                     "ok": true,
-                    "pid": Int32.random(in: 9000..<99999),
+                    "pid": VirtualChildPID.next(),
                     "exitCode": 0,
                     "stdout": path + "\n",
                     "stderr": "",
@@ -90,7 +90,7 @@ final class NodeSpawnBridge {
                 if result == .opened {
                     return Self.replyJSON([
                         "ok": true,
-                        "pid": Int32.random(in: 9000..<99999),
+                        "pid": VirtualChildPID.next(),
                         "exitCode": 0,
                         "stdout": "",
                         "stderr": "",
@@ -101,7 +101,7 @@ final class NodeSpawnBridge {
                     SystemOpen.log("open failed: \(why)")
                     return Self.replyJSON([
                         "ok": false,
-                        "pid": Int32.random(in: 9000..<99999),
+                        "pid": VirtualChildPID.next(),
                         "exitCode": 1,
                         "stdout": "",
                         "stderr": "\(file): \(why)\n",
@@ -110,25 +110,9 @@ final class NodeSpawnBridge {
                 }
             }
 
-            if !file.isEmpty, !FileManager.default.isExecutableFile(atPath: file),
-               !file.hasPrefix("/") {
-                let pathEnv = env["PATH"] ?? defaultEnv["PATH"] ?? "/bin"
-                let resolved = pathEnv.split(separator: ":").map { "\($0)/\(file)" }.first {
-                    FileManager.default.isExecutableFile(atPath: $0)
-                }
-                if resolved == nil, file != "sh", file != "/bin/sh" {
-                    return Self.replyJSON([
-                        "ok": false,
-                        "pid": Int32.random(in: 9000..<99999),
-                        "exitCode": NSNull(),
-                        "stdout": "",
-                        "stderr": "",
-                        "signal": NSNull(),
-                        "error": "spawn \(file) ENOENT",
-                        "code": "ENOENT",
-                    ])
-                }
-            }
+            // Do not probe the iOS host filesystem for a guest PATH entry.
+            // The executor owns resolution across native commands and other
+            // runtime lanes; only it can return an authoritative ENOENT.
             let result = executor.spawnSync(
                 file: file, args: args, cwd: cwd, env: env,
                 stdinFD: stdinFD, stdoutFD: stdoutFD, stderrFD: stderrFD,
@@ -141,8 +125,10 @@ final class NodeSpawnBridge {
                 "stderr": result.stderr,
                 "signal": result.signal as Any,
             ]
-            if result.exitCode != 0, result.stderr.contains("command not found")
-                || result.stderr.contains("No such file") {
+            if result.exitCode == 127 || (result.exitCode != 0 && (
+                result.stderr.contains("command not found") ||
+                result.stderr.contains("No such file")
+            )) {
                 reply["exitCode"] = NSNull()
                 reply["error"] = "spawn \(file) ENOENT"
                 reply["code"] = "ENOENT"
@@ -166,6 +152,22 @@ final class NodeSpawnBridge {
         case "SIGKILL": return Int32(SIGKILL)
         default: return Int32(SIGTERM)
         }
+    }
+}
+
+/// Process IDs in the Node shim identify in-process child jobs, not Darwin
+/// processes. A locked monotonic namespace keeps cancellation and replies
+/// stable without pretending they are host PIDs.
+enum VirtualChildPID {
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var nextValue: Int32 = 1
+
+    static func next() -> Int32 {
+        lock.lock()
+        defer { lock.unlock() }
+        let value = nextValue
+        nextValue = nextValue == Int32.max ? 1 : nextValue + 1
+        return value
     }
 }
 

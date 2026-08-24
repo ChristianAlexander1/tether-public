@@ -1,5 +1,6 @@
 import XCTest
 import SwiftTerm
+import TetherTerminal
 @testable import TermXUI
 
 final class TermXUITests: XCTestCase {
@@ -158,7 +159,7 @@ final class TermXUIAcceptanceTests: XCTestCase {
         let fixture = """
         \u{1B}[?1049h\u{1B}[1;1H\u{1B}[2J\u{1B}[32mSTATUS\u{1B}[0m\u{1B}[10;6HHello vim\u{1B}[24;1H\u{1B}[7m-- INSERT --\u{1B}[0m
         """
-        let terminal = Terminal(delegate: NullTerminalDelegate(), options: TerminalOptions(cols: 80, rows: 24))
+        let terminal = SwiftTerm.Terminal(delegate: NullTerminalDelegate(), options: TerminalOptions(cols: 80, rows: 24))
         terminal.feed(text: fixture)
         let snapshot = TerminalBufferSnapshot.capture(terminal)
         XCTAssertTrue(snapshot.contains("STATUS"))
@@ -167,8 +168,23 @@ final class TermXUIAcceptanceTests: XCTestCase {
         XCTAssertEqual(snapshot.split(separator: "\n").count, 24)
     }
 
+    func testDeliveredTerminalAndRendererSurviveUnknownDECMode() {
+        let stream = "\u{1B}[?2031hREADY\u{1B}[?2031l"
+
+        let conformance = TetherTerminal.Terminal(columns: 80, rows: 24)
+        conformance.feed(stream)
+        XCTAssertEqual(conformance.row(0), "READY")
+
+        let renderer = SwiftTerm.Terminal(
+            delegate: NullTerminalDelegate(),
+            options: TerminalOptions(cols: 80, rows: 24)
+        )
+        renderer.feed(text: stream)
+        XCTAssertTrue(TerminalBufferSnapshot.capture(renderer).contains("READY"))
+    }
+
     func testHighThroughputOutputMaintainsSixtyFPSFrameBudget() {
-        let terminal = Terminal(delegate: NullTerminalDelegate(), options: TerminalOptions(cols: 120, rows: 40, scrollback: 1000))
+        let terminal = SwiftTerm.Terminal(delegate: NullTerminalDelegate(), options: TerminalOptions(cols: 120, rows: 40, scrollback: 1000))
         let bytesPerFrame = 4 * 1024
         let frames = 256
         var maxFrame: CFTimeInterval = 0

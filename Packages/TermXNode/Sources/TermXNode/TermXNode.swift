@@ -4,7 +4,7 @@ import Darwin
 #endif
 import TermXCore
 
-// MARK: - Frozen NodeService protocol (09-integration-contracts.md §2.4)
+// MARK: - Node runtime protocol
 
 public protocol NodeService: AnyObject {
     func run(argv: [String], cwd: String, env: [String: String],
@@ -49,7 +49,6 @@ public final class RegistrySpawnExecutor: SpawnExecuting {
     /// One shared engine for all Node spawn IPC — avoids registering every builtin twice at launch.
     private static let sharedEngine = TermXCommandEngine()
     private let engine: TermXCommandEngine
-    private var nextPID: Int32 = 9000
 
     public init(engine: TermXCommandEngine? = nil) {
         self.engine = engine ?? Self.sharedEngine
@@ -58,8 +57,7 @@ public final class RegistrySpawnExecutor: SpawnExecuting {
     public func spawnSync(file: String, args: [String], cwd: String, env: [String: String],
                           stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
                           interactive: Bool) -> SpawnResult {
-        let pid = nextPID
-        nextPID += 1
+        let pid = VirtualChildPID.next()
         var capturedOut = ""
         var capturedErr = ""
         let writeOut: (String) -> Void = { text in
@@ -101,7 +99,7 @@ public final class RegistrySpawnExecutor: SpawnExecuting {
 
 // MARK: - Embedded Node service
 
-public final class EmbeddedNodeService: NodeService {
+public final class EmbeddedNodeService: NodeService, @unchecked Sendable {
     private let queue = DispatchQueue(label: "app.tether.node.jobs", qos: .userInitiated)
     private let runtime: NodeRuntime
     private var currentJob: NodeRunningJob?

@@ -1,68 +1,58 @@
 # Tether
 
-A real terminal for iPhone and iPad. Pick a folder, get a proper shell inside it — pipes,
-redirects, loops, `python3`, `node`, and a Linux package manager — all running on the
-device, with your files staying yours.
+Tether is an iPhone and iPad developer terminal built around a real Alpine
+Linux userland. A selected iOS folder is mounted at `/work`; commands installed
+with `apk` remain guest ELF programs executed by Blink. Embedded CPython,
+Node, and wasm3 provide iOS-safe runtime lanes where direct guest execution is
+not viable.
 
-```
-Documents % printf "one\ntwo\n" > src.txt
-Documents % awk '{print NR, $1}' src.txt
-1 one
-2 two
-Documents % python3 -c 'print(6*7)'
-42
-Documents % node -e 'console.log(2+2)'
-4
-Documents % linux /sbin/apk add git && git --version
-git version 2.45.4
-```
+The platform is generic by construction:
 
-## Why it works at all
+- guest execution is the default; installed package names are never added to
+  a Swift allow-list;
+- desktop opener commands share one URL/file-opening service;
+- host runtime dispatch is data-driven by
+  `tether_dispatch_manifest.json`;
+- Node child processes share one command protocol instead of consumer-specific
+  command branches;
+- no fabricated `uname`, Git identity, editor, hostname, CPU, memory, or
+  `process.platform` values are installed.
 
-iOS forbids `fork`/`exec`, so a normal terminal is impossible. Tether runs **every command
-inside the app process**: each one is a function invoked on its own thread with its own
-file descriptors, wired to a real pty. Python is embedded CPython, Node is nodejs-mobile,
-and anything else comes from an Alpine Linux userspace interpreted by Blink — which is how
-`apk add` installs from ~24,000 packages without ever executing downloaded native code.
+## Build and verify
 
-Everything bundled is under a permissive licence (MIT / BSD / ISC / Apache-2.0 / PSF), so
-the app can ship on the App Store.
-
-## Getting started
-
-- **Run it:** [`HOW-TO-RUN.md`](HOW-TO-RUN.md)
-- **Use it** (commands, installing and removing packages, storage): [`docs/USER-GUIDE.md`](docs/USER-GUIDE.md)
-- **Work on it** (architecture, rules, gotchas): [`docs/PROJECT-CONTEXT.md`](docs/PROJECT-CONTEXT.md)
-- **Current state and verified evidence:** [`STATUS-AND-REWORK.md`](STATUS-AND-REWORK.md)
-
-```bash
-xcodegen generate
-xcodebuild -project Tether.xcodeproj -scheme Tether \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -skipPackagePluginValidation -skipMacroValidation build
+```sh
+./scripts/validate.sh --quick
+./scripts/validate.sh --ios
 ```
 
-The three native xcframeworks (~708 MB: CPython, Node, Blink) are **not** in this repo —
-rebuild them with the scripts listed in [`Frameworks/README.md`](Frameworks/README.md).
+Use `--network` for real Alpine download/package-install acceptance, or `--all`
+for every automated gate. See [HOW-TO-RUN.md](HOW-TO-RUN.md) for simulator and
+device commands.
 
-## Layout
+The native frameworks are available under `Frameworks/` in this workspace.
+They are generated artifacts and are intentionally ignored by Git; their
+reproducible build scripts and notices live beside them.
 
-| Path | What |
+## Repository map
+
+| Path | Purpose |
 |---|---|
-| `App/` | SwiftUI app target, integration wiring, UI tests |
-| `Packages/TermXCore` | Shell parser, command engine, built-in commands |
-| `Packages/TermXUI` | SwiftTerm terminal view, pty, themes, keyboard bar |
-| `Packages/TermXFiles` | Folder picker, security-scoped bookmarks, workspaces |
-| `Packages/TermXPython` · `TermXNode` · `TermXLinux` · `TermXClaude` | Runtime lanes |
-| `External/` | Packages built standalone: shell language, extra commands, the Node shim |
-| `Frameworks/` | Build scripts and notices for the native binaries |
-| `docs/` | Plans, contracts, guides, remaining work |
+| `App/` | SwiftUI app, runtime integration, UI tests |
+| `Packages/TermXUI` | SwiftTerm renderer, PTY transport, keyboard and diagnostics |
+| `Packages/TermXCore` | Host command engine and real-fd shell bridge |
+| `Packages/TermXFiles` | Workspaces, bookmarks, browser/file presentation |
+| `Packages/TermXPython` | Embedded CPython |
+| `Packages/TermXNode` | Embedded Node and generic child-process protocol |
+| `Packages/TermXClaude` | Claude Code installation/runtime adapter |
+| `Packages/TermXLinux` | Alpine bootstrap, Blink execution, mounts and manifest dispatch |
+| `External/` | Standalone command, shell, terminal, WASM and JS protocol packages |
+| `Vendor/` | Clean-room filesystem/offload libraries, Linux harness, native-tool builds, RISC-V study |
+| `Frameworks/` | Reproducible native framework builds and local artifacts |
+| `docs/` | Architecture, validation, release and user documentation |
 
-*(Swift module names still carry the project's former `TermX` prefix; the shipped app is
-Tether.)*
+The shipped name is Tether. Some established Swift/C module and ABI names still
+use the earlier `TermX` prefix; compatibility names are read only where removing
+them would break existing installations or build automation.
 
-## Status
-
-The shell, Python, Node, the Linux lane and the folder picker are working and verified on
-the Simulator; 220 tests pass across nine packages. Remaining work is tracked in
-[`docs/10-remaining-work.md`](docs/10-remaining-work.md).
+Start with [the architecture](docs/ARCHITECTURE.md), [current evidence](STATUS-AND-REWORK.md),
+and [the user guide](docs/USER-GUIDE.md).

@@ -154,7 +154,7 @@ final class NodeTests: XCTestCase {
 
     func testTtyIsattyWhenInteractive() throws {
         guard let node = HostNodeRuntime.resolveNodeBinaryForTests(),
-              let preload = NodeShim.preloadPath else {
+              NodeShim.preloadPath != nil else {
             throw XCTSkip("node/shim unavailable")
         }
         let process = Process()
@@ -169,7 +169,7 @@ final class NodeTests: XCTestCase {
         }
         process.environment = [
             "NODE_OPTIONS": nodeOptionsParts.joined(separator: " "),
-            "TERMX_INTERACTIVE": "1",
+            "TETHER_INTERACTIVE": "1",
         ]
         let pipe = Pipe()
         process.standardOutput = pipe

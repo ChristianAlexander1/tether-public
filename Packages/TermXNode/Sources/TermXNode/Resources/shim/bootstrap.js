@@ -1,7 +1,7 @@
 'use strict';
 /**
  * Persistent Node service bootstrap for nodejs-mobile (single engine instance).
- * Swift posts JSON job lines on TERMX_JOB_FD; replies with exit code on TERMX_JOB_REPLY_FD.
+ * Swift posts JSON job lines on TETHER_JOB_FD; replies on TETHER_JOB_REPLY_FD.
  *
  * Job boundaries are enforced by lib/job_lifecycle.js — each command gets clean stdin
  * and mandatory teardown so npm leftovers cannot leak into the next job.
@@ -26,8 +26,8 @@ const fs = require('fs');
 const ipc = require('./lib/ipc');
 const lifecycle = require('./lib/job_lifecycle');
 
-const jobFD = Number(process.env.TERMX_JOB_FD ?? -1);
-const jobReplyFD = Number(process.env.TERMX_JOB_REPLY_FD ?? -1);
+const jobFD = Number(process.env.TETHER_JOB_FD ?? process.env.TERMX_JOB_FD ?? -1);
+const jobReplyFD = Number(process.env.TETHER_JOB_REPLY_FD ?? process.env.TERMX_JOB_REPLY_FD ?? -1);
 
 function writeReply(obj) {
   fs.writeSync(jobReplyFD, JSON.stringify(obj) + '\n');
@@ -84,8 +84,7 @@ process.on('unhandledRejection', (reason) => {
 
 function sanitizeHostPaths(text) {
   return String(text)
-    .replace(/\/Users\/[^/\s:'"]+/g, '/Users/<host>')
-    .replace(/Host-Machine\.local/gi, 'tether.local');
+    .replace(/\/Users\/[^/\s:'"]+/g, '/Users/<host>');
 }
 
 async function runJob(job, onDone) {
@@ -125,7 +124,7 @@ async function runJob(job, onDone) {
       lifecycle.enableLiveOutput();
     }
 
-    if (process.env.TERMX_IPC_SOCKET) {
+    if (process.env.TETHER_IPC_SOCK || process.env.TERMX_IPC_SOCKET) {
       await ipc.connect();
     }
 

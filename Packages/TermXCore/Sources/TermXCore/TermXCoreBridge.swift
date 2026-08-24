@@ -27,7 +27,7 @@ public struct termx_spawn_req {
     }
 }
 
-/// Global engine backing the frozen C API from docs/09-integration-contracts.md §2.1.
+/// Global engine backing the C API described by the public bridge header.
 public final class TermXCoreRuntime: @unchecked Sendable {
     public static let shared = TermXCoreRuntime()
 

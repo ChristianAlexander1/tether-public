@@ -436,9 +436,8 @@ static int TermxExec(char *execfn, char *prog, char **argv, char **envp) {
 
   if (g_interrupted) return 130;
 
-  /* Host-backed tools (Claude Bun→Node, full NodeMobile) — Docker illusion:
-   * from Alpine `sh` these look like normal commands. Proxied to a parent
-   * worker so we never run Swift/Node inside a Blink fork child. */
+  /* Manifest-declared platform runtimes are proxied to the parent worker so
+   * Swift and embedded engines never execute inside a Blink fork child. */
   if (g_host_exec && termx_blink_dispatch_should_proxy(prog)) {
     int host_code = 127;
     if (proxy_host_exec(prog, argv, envp, &host_code) == 0) {

@@ -9,7 +9,9 @@ protocol LinuxRuntime: AnyObject {
 
 enum LinuxRuntimeFactory {
     static func make(rootfs: URL, mapper: LinuxPathMapper) -> LinuxRuntime {
-        if ProcessInfo.processInfo.environment["TERMX_BLINK_EMBED"] == "1", BlinkEmbed.isAvailable {
+        let environment = ProcessInfo.processInfo.environment
+        if (environment["TETHER_BLINK_EMBED"] ?? environment["TERMX_BLINK_EMBED"]) == "1",
+           BlinkEmbed.isAvailable {
             return EmbeddedBlinkRuntime(mapper: mapper)
         }
         #if os(macOS)
@@ -36,7 +38,8 @@ enum BlinkPaths {
     }
 
     static var hostBinary: String {
-        if let override = ProcessInfo.processInfo.environment["TERMX_BLINK_BINARY"] {
+        let environment = ProcessInfo.processInfo.environment
+        if let override = environment["TETHER_BLINK_BINARY"] ?? environment["TERMX_BLINK_BINARY"] {
             return override
         }
         let candidates = [
@@ -49,7 +52,8 @@ enum BlinkPaths {
     }
 
     static var xcframeworkRoot: String {
-        ProcessInfo.processInfo.environment["TERMX_BLINK_XCFRAMEWORK"]
+        ProcessInfo.processInfo.environment["TETHER_BLINK_XCFRAMEWORK"]
+            ?? ProcessInfo.processInfo.environment["TERMX_BLINK_XCFRAMEWORK"]
             ?? frameworksRoot + "/Blink.xcframework"
     }
 }
@@ -110,7 +114,7 @@ final class EmbeddedBlinkRuntime: LinuxRuntime {
 }
 
 #if os(macOS)
-final class HostBlinkRuntime: LinuxRuntime {
+final class HostBlinkRuntime: LinuxRuntime, @unchecked Sendable {
     private let rootfs: URL
     private let mapper: LinuxPathMapper
     private var process: Process?
@@ -252,7 +256,6 @@ enum LinuxEnvironment {
             "LOGNAME": "root",
             "SHELL": "/bin/sh",
             "TMPDIR": "/tmp",
-            "HOSTNAME": "tether",
             "TERM": interactive ? "xterm-256color" : "dumb",
             "LANG": "C.UTF-8",
             "PWD": pwd,

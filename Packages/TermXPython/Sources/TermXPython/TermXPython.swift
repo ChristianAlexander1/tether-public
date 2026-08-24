@@ -16,7 +16,7 @@ public enum PythonRuntimeError: Error, Equatable {
     case initializationFailed
 }
 
-// MARK: - Environment defaults (09-integration-contracts.md §2.6)
+// MARK: - Environment defaults
 
 public enum PythonEnvironment {
     public static let pythonVersion = "3.14"
@@ -59,10 +59,13 @@ public enum PythonEnvironment {
 // MARK: - Support root discovery
 
 public enum PythonSupportLocator {
-    public static let overrideEnvironmentKey = "TERMX_PYTHON_ROOT"
+    public static let overrideEnvironmentKey = "TETHER_PYTHON_ROOT"
+    public static let legacyOverrideEnvironmentKey = "TERMX_PYTHON_ROOT"
 
     public static func locateXCFrameworkRoot() -> String? {
-        if let override = ProcessInfo.processInfo.environment[overrideEnvironmentKey], !override.isEmpty {
+        let environment = ProcessInfo.processInfo.environment
+        if let override = environment[overrideEnvironmentKey] ?? environment[legacyOverrideEnvironmentKey],
+           !override.isEmpty {
             return override
         }
         if let bundled = Bundle.main.resourcePath.map({ "\($0)/TermXPython.xcframework" }),
@@ -98,23 +101,22 @@ public enum PythonSupportLocator {
     }
 }
 
-// MARK: - Wheel index plan (binary wheels for iOS)
+// MARK: - Wheel indexes
 
 public enum PythonWheelIndex {
     /// Primary PyPI fallback for pure-Python wheels.
     public static let pypiURL = "https://pypi.org/simple"
 
-    /// TermX-hosted index for prebuilt iOS binary wheels (PEP 730 tags).
-    /// Populate via Mobile Forge / BeeWare wheel pipeline; not required for pure-Python packages.
-    public static let termxBinaryWheelIndexURL = "https://wheels.termx.dev/ios/simple/"
-
     /// a-Shell community index (BSD-licensed hosting) as secondary binary source.
     public static let aShellWheelIndexURL = "https://github.com/hololeap/PyPi-index-aarch64-apple-ios/releases/download/v1.0/index.html"
 
-    public static func pipInstallArgs(package: String, useTermXIndex: Bool = false) -> [String] {
+    /// Builds a normal pip command. A binary index is used only when the caller
+    /// supplies a deployed PEP 503 endpoint; the app does not advertise a
+    /// placeholder service.
+    public static func pipInstallArgs(package: String, binaryIndexURL: URL? = nil) -> [String] {
         var args = ["python3", "-m", "pip", "install", "--no-input"]
-        if useTermXIndex {
-            args += ["--index-url", termxBinaryWheelIndexURL, "--extra-index-url", pypiURL]
+        if let binaryIndexURL {
+            args += ["--index-url", binaryIndexURL.absoluteString, "--extra-index-url", pypiURL]
         }
         args.append(package)
         return args
@@ -126,15 +128,12 @@ public enum TermXPythonResources {
         Bundle.module.url(forResource: "registry", withExtension: "json")
     }
 
-    public static var wheelIndexPlanURL: URL? {
-        Bundle.module.url(forResource: "wheel-index", withExtension: "json")
-    }
 }
 
 // MARK: - Embedded service
 
-public final class EmbeddedPythonService: PythonRuntime {
-    private let queue = DispatchQueue(label: "com.termx.python.jobs", qos: .userInitiated)
+public final class EmbeddedPythonService: PythonRuntime, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "app.tether.python.jobs", qos: .userInitiated)
     private var interrupted = false
     /// Prevents `bootstrapPipIfNeeded` → `run(python3 -m pip)` → bootstrap recursion.
     private var isBootstrappingPip = false
@@ -285,7 +284,7 @@ public final class EmbeddedPythonService: PythonRuntime {
 
     /// Installs pip into `$PYTHONUSERBASE` without subprocess/fork (required on iOS).
     public func bootstrapPipIfNeeded(home: String) async throws {
-        var env = PythonEnvironment.merge(base: [:], cwd: home, home: home)
+        let env = PythonEnvironment.merge(base: [:], cwd: home, home: home)
         let check = await run(argv: ["python3", "-m", "pip", "--version"], cwd: home, environment: env,
                               stdinFD: -1, stdoutFD: -1, stderrFD: -1, interactive: false)
         if check == 0 { return }
@@ -334,13 +333,13 @@ public final class EmbeddedPythonService: PythonRuntime {
                            stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
                            interactive: Bool) -> Int32 {
         let normalized = normalizeArgv(argv)
-        var cStrings = normalized.map { strdup($0) }
+        let cStrings = normalized.map { strdup($0) }
         defer { cStrings.forEach { free($0) } }
         var argvPointers = cStrings.map { UnsafeMutablePointer(mutating: $0) }
         argvPointers.append(nil)
 
         let envPairs = environment.map { "\($0.key)=\($0.value)" }
-        var envStorage = envPairs.map { strdup($0) }
+        let envStorage = envPairs.map { strdup($0) }
         defer { envStorage.forEach { free($0) } }
         var envPointers: [UnsafePointer<CChar>?] = envStorage.map { UnsafePointer($0!) }
         envPointers.append(nil)

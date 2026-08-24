@@ -215,15 +215,18 @@ public enum ClaudeNodeInstaller {
         let fm = FileManager.default
         let root = ClaudeRuntimeProbe.installRoot(home: home)
         try fm.createDirectory(atPath: root, withIntermediateDirectories: true)
-        for name in ["launcher", "bun-shim", "termx-open-stub"] {
+        for name in ["launcher", "bun-shim"] {
             guard let src = resourceURL(name: name, ext: "js") else {
-                if name == "termx-open-stub" { continue }
                 throw InstallError.resourcesMissing
             }
             let dest = (root as NSString).appendingPathComponent("\(name).js")
             try? fm.removeItem(atPath: dest)
             try fm.copyItem(at: src, to: URL(fileURLWithPath: dest))
         }
+        // Remove the obsolete command-specific browser module installed by
+        // earlier builds. The generic child-process opener now owns this path.
+        let legacyOpenStub = (root as NSString).appendingPathComponent("termx-open-stub.js")
+        try? fm.removeItem(atPath: legacyOpenStub)
         if let notice = resourceURL(name: "NOTICE-claude-bun-bridge", ext: "txt") {
             let dest = (root as NSString).appendingPathComponent("NOTICE-claude-bun-bridge.txt")
             try? fm.removeItem(atPath: dest)

@@ -12,22 +12,8 @@ require('./bun-shim.js')
 // Extracted Claude JS assumes platform linux (Bun linux bundle). Ensure browser open
 // is attempted — otherwise h_f() returns no_display and OAuth never spawns xdg-open.
 process.env.DISPLAY = process.env.DISPLAY || ':0'
-process.env.WAYLAND_DISPLAY = process.env.WAYLAND_DISPLAY || 'termx'
+process.env.WAYLAND_DISPLAY = process.env.WAYLAND_DISPLAY || 'tether'
 process.env.BROWSER = process.env.BROWSER || 'open'
-
-// Claude Code uses the npm `open` package on darwin — stub it to our platform opener.
-;(function stubOpenPackage() {
-  const stubPath = path.join(__dirname, 'termx-open-stub.js')
-  if (!fs.existsSync(stubPath)) return
-  const _resolve = Module._resolveFilename
-  Module._resolveFilename = function (request, parent, isMain, options) {
-    const base = request.split('/').pop()
-    if (request === 'open' || base === 'open' || request.startsWith('open/')) {
-      return stubPath
-    }
-    return _resolve.call(this, request, parent, isMain, options)
-  }
-})()
 
 // NodeMobile / jitless V8 ships a broken Intl.Segmenter (null deref in
 // JSSegments::Create). Claude's interactive TUI calls it and SIGSEGVs the app.

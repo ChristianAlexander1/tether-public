@@ -5,6 +5,7 @@
  */
 #include "test_common.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -49,12 +50,17 @@ int main(void)
           backing data/f0500.txt, then verify must report >= 1 problem */
     int fd = tether_fakefs_open_fd(fs, "data/f0500.txt");
     CHECK(fd >= 0, "open_fd failed: %d", fd);
-    /* find the real path via /proc so we can reopen it writable */
-    char linkbuf[TETHER_FAKEFS_PATH_MAX], proc[64];
+    /* Find the real path so the corruption probe can reopen it writable. */
+    char linkbuf[TETHER_FAKEFS_PATH_MAX];
+#if defined(__APPLE__) && defined(F_GETPATH)
+    CHECK(fcntl(fd, F_GETPATH, linkbuf) == 0, "F_GETPATH failed");
+#else
+    char proc[64];
     snprintf(proc, sizeof(proc), "/proc/self/fd/%d", fd);
     ssize_t ln = readlink(proc, linkbuf, sizeof(linkbuf) - 1);
     CHECK(ln > 0, "readlink /proc fd failed");
     linkbuf[ln] = '\0';
+#endif
     close(fd);
 
     FILE *f = fopen(linkbuf, "r+b");

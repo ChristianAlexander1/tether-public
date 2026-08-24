@@ -33,8 +33,8 @@ public struct GuestDispatchManifest: Codable, Equatable, Sendable {
         self.hostRuntimes = hostRuntimes
     }
 
-    /// Basenames that need busybox stubs under `/usr/local/bin` in the guest rootfs.
-    public var stubBasenames: [String] {
+    /// Basenames that need executable launcher entries in the guest rootfs.
+    public var launcherBasenames: [String] {
         var names = Set(browserOpeners)
         for row in hostRuntimes where row.match == "basename" {
             names.insert(row.name)
@@ -60,25 +60,40 @@ public struct GuestDispatchManifest: Codable, Equatable, Sendable {
         ), let data = try? Data(contentsOf: url), let manifest = try? load(from: data) {
             return manifest
         }
-        return GuestDispatchManifest(
-            browserOpeners: ["open", "xdg-open"],
-            hostRuntimes: [
-                HostRuntime(match: "basename", name: "node", handler: "node-mobile"),
-                HostRuntime(match: "basename", name: "npm", handler: "node-mobile"),
-                HostRuntime(match: "basename", name: "npx", handler: "node-mobile"),
-                HostRuntime(match: "basename", name: "claude", handler: "node-mobile"),
-                HostRuntime(match: "basename", name: "wasm", handler: "wasm3"),
-            ]
-        )
+        return GuestDispatchManifest(browserOpeners: [], hostRuntimes: [])
     }
 
     /// Push manifest rows into the Blink bridge (iOS only; no-op in stub builds).
     public func installIntoBlinkBridge() {
 #if canImport(TermXBlinkBridge)
         termx_blink_dispatch_reset()
-        for name in stubBasenames {
+        for name in launcherBasenames {
             _ = name.withCString { termx_blink_dispatch_add($0) }
         }
 #endif
+    }
+}
+
+enum GuestRuntimeLauncherInstaller {
+    static func install(names: [String], rootfs: URL) throws {
+        let fm = FileManager.default
+        let busybox = rootfs.appendingPathComponent("bin/busybox").path
+        guard fm.fileExists(atPath: busybox) else { return }
+        let destinationDirectory = rootfs.appendingPathComponent("usr/local/bin", isDirectory: true)
+        try fm.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+
+        for name in names {
+            let destination = destinationDirectory.appendingPathComponent(name).path
+            if (try? fm.attributesOfItem(atPath: destination)) != nil {
+                // Migrate only the exact BusyBox copies installed by older
+                // builds. Never replace a command installed by the user.
+                guard fm.contentsEqual(atPath: busybox, andPath: destination) else { continue }
+                try fm.removeItem(atPath: destination)
+            }
+            try fm.createSymbolicLink(
+                atPath: destination,
+                withDestinationPath: "../../../bin/busybox"
+            )
+        }
     }
 }

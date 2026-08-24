@@ -43,9 +43,34 @@ structure_check() {
   test -f "$ROOT/External/TetherWasm/Package.swift"
   test -f "$ROOT/Packages/TermXLinux/Sources/TermXLinux/Resources/tether_dispatch_manifest.json"
 
+  local removed_paths=(
+    "$ROOT/External/termx-shim"
+    "$ROOT/tether-docs"
+    "$ROOT/TetherShellLang"
+    "$ROOT/TetherTerminal"
+    "$ROOT/TetherWasm"
+    "$ROOT/TetherNativeTools"
+    "$ROOT/TetherRiscv"
+    "$ROOT/tether-linux-harness"
+    "$ROOT/Packages/TermXClaude/Sources/TermXClaude/Resources/termx-open-stub.js"
+    "$ROOT/Packages/TermXPython/Sources/TermXPython/Resources/wheel-index.json"
+  )
+  for removed in "${removed_paths[@]}"; do
+    if test -e "$removed"; then
+      echo "obsolete path returned: ${removed#"$ROOT"/}" >&2
+      exit 1
+    fi
+  done
+
   if rg -n 'fatalError\("unimplemented|TODO: implement|FIXME: implement' \
       "$ROOT/App" "$ROOT/Packages" --glob '*.swift'; then
     echo "unfinished source marker detected" >&2
+    exit 1
+  fi
+
+  if rg -n 'wheels\.termx\.dev|process\.platform\s*=|Int32\.random\(in: 9000' \
+      "$ROOT/App" "$ROOT/Packages" "$ROOT/External" --glob '!**/Tests/**' --glob '!**/test/**'; then
+    echo "obsolete fabricated runtime behavior detected" >&2
     exit 1
   fi
 }
@@ -77,6 +102,36 @@ quick_tests() {
   cmake -S "$ROOT/External/TetherWasm" -B "$BUILD_ROOT/wasm" -DTETHER_WASM_BUILD_TESTS=ON
   cmake --build "$BUILD_ROOT/wasm" --parallel
   ctest --test-dir "$BUILD_ROOT/wasm" --output-on-failure
+
+  echo "== CMake/CTest: Vendor/TetherFakefs =="
+  local fakefs_cmake_args=(
+    -S "$ROOT/Vendor/TetherFakefs"
+    -B "$BUILD_ROOT/fakefs"
+    -DCMAKE_BUILD_TYPE=Release
+  )
+  if command -v brew >/dev/null 2>&1; then
+    local libarchive_prefix
+    if libarchive_prefix="$(brew --prefix libarchive 2>/dev/null)"; then
+      fakefs_cmake_args+=("-DCMAKE_PREFIX_PATH=$libarchive_prefix")
+    fi
+  fi
+  cmake "${fakefs_cmake_args[@]}"
+  cmake --build "$BUILD_ROOT/fakefs" --parallel
+  ctest --test-dir "$BUILD_ROOT/fakefs" --output-on-failure
+
+  echo "== C tests: Vendor/TetherNativeOffload =="
+  cc -std=c11 -Wall -Wextra -Wpedantic -Werror \
+    -I"$ROOT/Vendor/TetherNativeOffload/include" \
+    "$ROOT/Vendor/TetherNativeOffload/src/offload.c" \
+    "$ROOT/Vendor/TetherNativeOffload/tests/test_offload.c" \
+    -o "$BUILD_ROOT/test-offload"
+  "$BUILD_ROOT/test-offload"
+
+  echo "== Portable script and report checks =="
+  bash -n "$ROOT/Vendor/tether-linux-harness/run-all.sh" \
+    "$ROOT"/Vendor/tether-linux-harness/fixtures/*.sh \
+    "$ROOT"/Vendor/TetherNativeTools/*/*.sh
+  test -f "$ROOT/Vendor/TetherRiscv/REPORT.md"
 }
 
 linux_network_tests() {
