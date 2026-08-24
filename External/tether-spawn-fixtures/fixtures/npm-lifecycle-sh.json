@@ -1,0 +1,5 @@
+{
+  "name": "npm-lifecycle-sh",
+  "spawn": { "kind": "spawn", "file": "sh", "args": ["-c", "node scripts/postinstall.js"], "cwd": "/work", "env": { "WAYLAND_DISPLAY": "tether" }, "interactive": false, "shell": true },
+  "expect": { "exit": 0 }
+}

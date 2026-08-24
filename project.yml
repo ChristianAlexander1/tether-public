@@ -18,6 +18,8 @@ packages:
     path: Packages/TermXClaude
   TermXLinux:
     path: Packages/TermXLinux
+  TetherWasm:
+    path: External/TetherWasm
 targets:
   Tether:
     type: application
@@ -28,6 +30,7 @@ targets:
       - path: App/StorageView.swift
       - path: App/WorkspaceFilesView.swift
       - path: App/IntegrationSource/TermXIntegration.swift
+      - path: App/IntegrationSource/TetherWasmService.swift
       - path: App/Resources
         optional: true
         buildPhase: resources
@@ -50,6 +53,7 @@ targets:
       - package: TermXNode
       - package: TermXClaude
       - package: TermXLinux
+      - package: TetherWasm
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tether.app

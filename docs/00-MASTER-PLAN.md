@@ -1,43 +1,43 @@
-# Master Plan — "TermX": A Real Terminal for iPhone & iPad
+# Master Plan — Tether: A Real Terminal for iPhone & iPad
 
-> **The goal:** A native iOS/iPadOS app that gives you a real terminal — run thousands of
-> Unix/Linux commands, install and use Python and Node, and run **Claude Code locally** —
-> all scoped to a folder the user picks, working like a real terminal in that space.
-> Publishable on the App Store under our own name, built from permissively-licensed parts.
+> **The goal:** A native iOS/iPadOS app that gives you a real terminal — thousands of
+> Unix/Linux commands, Python, Node, **Claude Code locally**, and a full Alpine Linux
+> userspace — scoped to folders you pick, App Store shippable, built from permissively-
+> licensed parts.
 
-This is 100% achievable. It has been proven piece by piece by shipped App Store apps
-(a-Shell, iSH, Code App, LibTerm). What has *not* been shipped yet is all of it in one app
-with Claude Code running locally — that's our edge and our product.
+This is achievable. a-Shell, iSH, Code App, and Pyto prove the pieces. **Tether ships all
+of them together** with Claude Code as the headline.
 
 ---
 
 ## 1. The one key insight
 
-iOS forbids `fork()`/`exec()` — an app cannot spawn separate processes. Every terminal app
-on iOS solves this one problem in one of two ways:
+iOS forbids `fork()`/`exec()` — an app cannot spawn separate OS processes. Every terminal
+app solves this with **in-process virtualization**:
 
-| Approach | How | Speed | Example | License of example |
+| Lane | How | Speed | Reference apps | License |
 |---|---|---|---|---|
-| **A. Native in-process commands** | Compile each Unix command as a library; "spawning" a command = calling its `main()` on a thread inside the app | Native ARM64 speed (fast) | a-Shell / ios_system | **BSD 3-Clause (we can use it!)** |
-| **B. CPU emulation** | Emulate an x86 Linux userspace inside the app; run a real Alpine Linux rootfs | 10–50x slower | iSH | GPL (we avoid the code, copy the idea) |
+| **A. Native in-process** | Each command's `main()` on a thread with isolated fds/cwd | Full ARM64 | a-Shell / ios_system | BSD-3 |
+| **B. WASM** | wasm32-wasi bytecode interpreter | Fast | a-Shell | MIT |
+| **C. CPU emulation** | Usermode Linux kernel + emulator + Alpine rootfs | Emulated | iSH / ios-linuxkit | GPL code — **we use Blink/libriscv instead** |
 
-**Our architecture uses BOTH, with A as the primary lane:**
+**Tether uses all three lanes as peers:**
 
-- **Lane A (primary, fast):** ios_system-style native commands + native CPython + embedded
-  Node.js (nodejs-mobile) + a WASM runtime for extra tools. This is where the shell, the
-  1000s of commands, Python, Node, and Claude Code live. Everything runs at full device speed.
-- **Lane B (compatibility, optional):** an embedded x86-64 usermode emulator based on
-  **Blink** (ISC license — permissive!) with an Alpine rootfs, for the rare tool that only
-  exists as a Linux binary (`apk add anything`). This is iSH's capability without iSH's GPL.
+- **Lane A:** ios_system-style native commands + CPython + nodejs-mobile + libgit2, ripgrep,
+  curl, vim ports. Shell, git, rg, and fast tooling live here.
+- **Lane B:** wasm3/WasmKit + WASI — unlimited user-extensible commands (App Store safe).
+- **Lane C:** Blink (+ libriscv bake-off) + Alpine — `apk add` anything, real Linux ELF
+  binaries, gcc, exotic tools. **Primary interactive session today; growing toward ios-linuxkit
+  depth** (fakefs, bind mounts, manifest dispatch, syscall completeness).
+
+**Guest platform contract:** [`GUEST-PLATFORM.md`](GUEST-PLATFORM.md) — default exec is guest
+ELF; only URL openers + manifest host runtimes cross to the host.
 
 ## 2. Component map
 
-Each component has its own doc and can be built by a separate agent in parallel.
-
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                       TermX iOS App                         │
-│                                                             │
+│                       Tether iOS App                        │
 │  ┌───────────────┐   ┌──────────────────────────────────┐   │
 │  │ C1 Terminal UI │──▶│ C2 Shell & Command Engine        │   │
 │  │ (SwiftTerm)    │   │ (ios_system + dispatcher + PTY)  │   │
@@ -46,7 +46,7 @@ Each component has its own doc and can be built by a separate agent in parallel.
 │                   ┌──────────▼──┐ ┌─────▼─────┐ ┌▼────────┐ │
 │                   │ C4 Runtimes │ │ C5 Claude │ │ C6 Linux │ │
 │                   │ Python+Node │ │ Code      │ │ Engine   │ │
-│                   └─────────────┘ └───────────┘ │ (Blink)  │ │
+│                   └─────────────┘ └───────────┘ │ Blink+…  │ │
 │                                                 └─────────┘ │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │ C3 Filesystem & Folder Access (bookmarks, sandbox)   │   │
@@ -57,72 +57,58 @@ Each component has its own doc and can be built by a separate agent in parallel.
 
 | # | Component | Doc | Core reused tech (license) |
 |---|---|---|---|
-| C1 | Terminal UI | `01-terminal-ui.md` | SwiftTerm (MIT) |
-| C2 | Shell & command engine | `02-shell-core.md` | ios_system (BSD-3), wasm3/WASI (MIT) |
-| C3 | Filesystem & folder access | `03-filesystem-folders.md` | Apple APIs (security-scoped bookmarks) |
-| C4 | Python & Node runtimes | `04-runtimes-python-node.md` | CPython official iOS support (PSF), nodejs-mobile (MIT) |
-| C5 | Claude Code integration | `05-claude-code-integration.md` | Claude Code npm pkg / Claude Agent SDK / API |
-| C6 | Linux engine (fallback) | `06-linux-emulation.md` | Blink emulator (ISC), Alpine rootfs (mixed, unbundled) |
+| C1 | Terminal UI | `01-terminal-ui.md` | SwiftTerm (MIT); evaluate Ghostty Web (MIT) |
+| C2 | Shell & command engine | `02-shell-core.md` | ios_system (BSD-3), wasm3 (MIT) |
+| C3 | Filesystem & folder access | `03-filesystem-folders.md` | Apple security-scoped bookmarks |
+| C4 | Python & Node runtimes | `04-runtimes-python-node.md` | CPython (PSF), nodejs-mobile (MIT) |
+| C5 | Claude Code integration | `05-claude-code-integration.md` | User-installed npm pkg |
+| C6 | Linux engine | `06-linux-emulation.md` | Blink (ISC), libriscv (BSD-3), Alpine |
 | C7 | App Store & licensing | `07-appstore-licensing.md` | — |
 | C8 | Roadmap & agent work split | `08-roadmap.md` | — |
-| C9 | **Integration contracts & handoff rules** | `09-integration-contracts.md` | — |
+| C9 | Integration contracts | `09-integration-contracts.md` | — |
+| — | **Guest platform contract** | **`GUEST-PLATFORM.md`** | Default guest ELF; manifest dispatch |
+| **C10** | **Parallel agent plan** | **`13-parallel-agent-plan.md`** | Offline/online agent briefs |
 
-> **Handoff rule:** every component agent receives THREE docs: their component doc,
-> `09-integration-contracts.md` (frozen APIs, deliverable format, acceptance tests —
-> mandatory), and `07-appstore-licensing.md` (dependency rules). Components come back as
-> folders matching the repo layout in doc 09; the integrator verifies, wires, and runs
-> the end-to-end suite before the user's final device test.
+> **Handoff rule:** component agents receive their doc + `09-integration-contracts.md` +
+> `07-appstore-licensing.md`. Offline agents use `13-parallel-agent-plan.md` (self-contained).
 
-## 3. What we reuse vs. build (the license answer)
+## 3. Licensing (legal guardrails — not a feature cap)
 
-Your worry about "licensed repos" is solved by picking the right licenses. Three tiers:
+- **Green (bundle freely):** MIT, BSD, ISC, Apache-2, PSF, MirOS, SIL-OFL.
+- **Red (never compile into app binary):** GPL/AGPL source. Use BSD/MIT equivalents or
+  interpreted/emulated guest packages (Alpine apk at user request — iSH precedent).
+- **Anthropic Claude Code:** user-installed via npm under their terms; we ship a launcher.
 
-- **✅ Free to use, modify, rebrand, sell, publish closed-source:** MIT, BSD, ISC, Apache-2.0,
-  Python-PSF. This covers SwiftTerm, ios_system, nodejs-mobile, wasm3, Blink, CPython,
-  libgit2, curl, and most of what we need. Only obligation: keep a "Licenses" screen in the
-  app listing their copyright notices. Every commercial app does this.
-- **⚠️ Avoid bundling:** GPL/LGPL code (iSH's emulator, bash, GNU coreutils, git-the-GNU-build).
-  We use BSD/MIT equivalents instead: `dash`/`mksh`-style shell (see C2), BSD utilities,
-  libgit2. Lane B downloads Alpine packages *at user request onto user's device*, which is the
-  iSH-proven pattern.
-- **📄 Anthropic:** Claude Code npm package is under Anthropic's commercial terms — users log
-  in with their own account, same as running it anywhere. Nothing to relicense.
+Full table: `07-appstore-licensing.md`.
 
-Full table in `07-appstore-licensing.md`.
+## 4. User experience (complete product)
 
-## 4. How the user experience works
+1. Pick a folder → security-scoped bookmark → permanent access.
+2. Terminal opens in that folder — full pty, colors, vim, TUIs, Claude Code TUI.
+3. Native speed: `ls`, `grep`, `git`, `rg`, `python`, `pip`, `node`, `npm`, `claude`.
+4. Linux session: Alpine shell at `/work`; `apk add` anything; guest and native tools share
+   the same workspace via bind mounts.
+5. WASM: drop binaries in `~/wasm/bin` — instant new commands.
+6. OAuth login, in-app browser, guest localhost info — all wired.
 
-1. User opens TermX → picks a folder with the iOS folder picker (Files app, iCloud Drive,
-   local, even folders from other apps' File Providers).
-2. TermX stores a **security-scoped bookmark** → permanent read/write access to that folder.
-3. A terminal opens with `cwd` inside that folder. Prompt, tabs, arrow keys, ctrl keys — a
-   real terminal (SwiftTerm renders full xterm/VT100, so vim, htop-style TUIs, colors all work).
-4. `ls`, `grep`, `sed`, `awk`, `git`, `curl`, `python`, `pip`, `node`, `npm`… run natively.
-5. `claude` launches Claude Code on the embedded Node runtime, operating on that folder.
-6. Optional: `linux` drops into the Alpine environment (Lane B) for anything exotic.
+## 5. Build order
 
-## 5. Build order (summary — details in 08-roadmap.md)
+See `08-roadmap.md` and **`13-parallel-agent-plan.md`** for the full parallel work split.
 
-- **M1 — Walking skeleton:** SwiftTerm view + ios_system + folder picker. You can `ls`, `cd`,
-  `cat`, pipe, redirect inside a picked folder. (This alone is already a shippable mini-app.)
-- **M2 — Real shell feel:** command history, tab-completion, multiple tabs, key toolbar
-  (Esc/Ctrl/arrows), themes.
-- **M3 — Runtimes:** CPython + pip; nodejs-mobile + npm.
-- **M4 — Claude Code:** embedded Node runs the `claude` CLI with our process-shim layer; PTY
-  wiring so its TUI renders perfectly.
-- **M5 — Linux lane:** Blink + Alpine rootfs, `apk add` anything.
-- **M6 — Polish & ship:** licenses screen, App Store review strategy (C7), TestFlight, launch.
+Integration milestones (all required for ship):
 
-Milestones M1–M4 are the product. M5 is the power-user cherry on top.
+- **M1** Walking skeleton: pty + folder picker + core shell
+- **M2** Full shell + native command tier (ios_system + rg/jq/fd/git)
+- **M3** Python + Node runtimes + `@tether/shim` (generic spawn)
+- **M4** Claude Code end-to-end (login, TUI, edit, commit, interrupt)
+- **M5** Linux engine at ios-linuxkit parity (fakefs, mounts, offload, tests)
+- **M6** WASM tier + terminal polish (DEC modes, width, Ghostty eval)
+- **M7** Device hardening + App Store submission
 
-## 6. Ground rules for all agents working on components
+## 6. Ground rules for all agents
 
-- Swift + SwiftUI app shell; C/C++/ObjC where the reused libraries need it.
-- Xcode project lives at repo root; each component is a Swift Package or xcframework where
-  possible, so agents can work independently.
-- Never bundle GPL code into the app binary. Check `07-appstore-licensing.md` before adding
-  any dependency.
-- Every command runs on a background thread/queue with its own stdin/stdout/stderr file
-  descriptors — never block the main thread.
-- All temp/scratch inside the app sandbox; user data only inside the picked folder.
-- Target: iOS 16+, iPhone and iPad, Mac Catalyst free bonus later.
+- Swift + SwiftUI shell; C/C++/Rust where libraries require it.
+- Never bundle GPL **source compiled into the app binary**. Guest apk packages are fine.
+- Every command on a background thread; never block main; never close fds while blocked reads run.
+- All scratch in sandbox; user data only in picked folders.
+- iOS 16+, iPhone and iPad; Mac Catalyst when ready.

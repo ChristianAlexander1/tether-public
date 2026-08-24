@@ -78,9 +78,27 @@ function restoreStdin() {
   savedStdin = null;
 }
 
+function shouldTeardownHandle(handle, keepRef) {
+  if (!handle || handle === keepRef) return false;
+  if (handle === process.stdin || handle === process.stdout || handle === process.stderr) {
+    return false;
+  }
+  // Never close the persistent job pipes — reply-before-teardown is the primary
+  // fix, but keep these FDs alive if they appear in _getActiveHandles.
+  try {
+    const replyFD = Number(process.env.TERMX_JOB_REPLY_FD ?? -1);
+    const jobFD = Number(process.env.TERMX_JOB_FD ?? -1);
+    const fd = typeof handle.fd === 'number' ? handle.fd : -1;
+    if (fd >= 0 && (fd === replyFD || fd === jobFD)) return false;
+  } catch (_) { /* ignore */ }
+  const ctor = handle.constructor && handle.constructor.name;
+  if (ctor === 'WriteStream' || ctor === 'ReadStream' || ctor === 'TTY') return false;
+  return true;
+}
+
 /**
  * Close handles and listeners left by npm / short CLIs. `keepRef` is the job intake
- * socket — must stay open between jobs.
+ * socket — must stay open between jobs. Stdio streams are never destroyed.
  */
 function teardownJob(keepRef) {
   try {
@@ -100,7 +118,15 @@ function teardownJob(keepRef) {
 
   if (typeof process._getActiveHandles === 'function') {
     for (const handle of process._getActiveHandles()) {
-      if (handle === keepRef) continue;
+      if (!shouldTeardownHandle(handle, keepRef)) continue;
+      const ctor = handle.constructor && handle.constructor.name;
+      if (ctor === 'Timeout' || ctor === 'Immediate' || ctor === 'Timer') {
+        try {
+          if (typeof handle.close === 'function') handle.close();
+          else if (typeof handle.unref === 'function') handle.unref();
+        } catch (_) { /* ignore */ }
+        continue;
+      }
       try {
         if (typeof handle.unref === 'function') handle.unref();
         if (typeof handle.close === 'function') handle.close();
@@ -116,6 +142,23 @@ function teardownJob(keepRef) {
       } catch (_) { /* ignore */ }
     }
   }
+}
+
+/** Push each stdout/stderr write to the PTY immediately (embedded Node buffers otherwise). */
+function enableLiveOutput() {
+  if (enableLiveOutput._installed) return;
+  enableLiveOutput._installed = true;
+  const fs = require('fs');
+  function wrap(stream, fd) {
+    const orig = stream.write.bind(stream);
+    stream.write = function wrappedWrite(chunk, encoding, cb) {
+      const ret = orig(chunk, encoding, typeof encoding === 'function' ? encoding : cb);
+      try { fs.fsyncSync(fd); } catch (_) { /* ignore */ }
+      return ret;
+    };
+  }
+  wrap(process.stdout, 1);
+  wrap(process.stderr, 2);
 }
 
 /**
@@ -145,7 +188,20 @@ function silenceEventLoopStorm() {
   }, 0);
 }
 
+/** ora/npm progress spinners hide the cursor and redraw with \\r — reset on job end. */
+function clearProgressLine() {
+  try {
+    process.stderr.write('\x1b[?25h\x1b[2K\r');
+  } catch (_) { /* ignore */ }
+  try {
+    process.stdout.write('\x1b[2K\r');
+  } catch (_) { /* ignore */ }
+}
+
 function finishJob(keepRef, ipc) {
+  if ((process.env.TETHER_INTERACTIVE ?? process.env.TERMX_INTERACTIVE) === '1') {
+    clearProgressLine();
+  }
   silenceEventLoopStorm();
   teardownJob(keepRef);
   restoreStdin();
@@ -158,4 +214,5 @@ module.exports = {
   teardownJob,
   silenceEventLoopStorm,
   finishJob,
+  enableLiveOutput,
 };

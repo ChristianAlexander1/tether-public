@@ -1,7 +1,7 @@
 import Foundation
 
 #if os(macOS)
-/// macOS / host-Node runtime: one Node process per job with @termx/shim IPC into TermXCore.
+/// macOS / host-Node runtime: one Node process per job with @tether/shim IPC into the command engine.
 final class HostNodeRuntime: NodeRuntime {
     private let spawnExecutor: SpawnExecuting
     private var currentProcess: Process?
@@ -29,7 +29,9 @@ final class HostNodeRuntime: NodeRuntime {
         process.currentDirectoryURL = URL(fileURLWithPath: job.cwd)
 
         var env = job.env
+        env["TETHER_IPC_SOCK"] = server.path
         env["TERMX_IPC_SOCKET"] = server.path
+        env["TETHER_INTERACTIVE"] = job.interactive ? "1" : "0"
         env["TERMX_INTERACTIVE"] = job.interactive ? "1" : "0"
         var nodeOptionsParts: [String] = []
         if let ensureIpc = NodeShim.ensureIpcPath {
@@ -81,31 +83,48 @@ final class HostNodeRuntime: NodeRuntime {
         do {
             try process.run()
 
+            let drainGroup = DispatchGroup()
+            drainGroup.enter()
             DispatchQueue.global().async {
+                defer { drainGroup.leave() }
                 let data = outPipe.fileHandleForReading.readDataToEndOfFile()
                 if job.stdoutFD >= 0, !data.isEmpty {
-                    _ = data.withUnsafeBytes { ptr in
-                        write(job.stdoutFD, ptr.baseAddress!, data.count)
-                    }
+                    Self.writeAll(data, to: job.stdoutFD)
                 }
             }
+            drainGroup.enter()
             DispatchQueue.global().async {
+                defer { drainGroup.leave() }
                 let data = errPipe.fileHandleForReading.readDataToEndOfFile()
                 if job.stderrFD >= 0, !data.isEmpty {
-                    _ = data.withUnsafeBytes { ptr in
-                        write(job.stderrFD, ptr.baseAddress!, data.count)
-                    }
+                    Self.writeAll(data, to: job.stderrFD)
                 }
             }
 
+            var cancellationStartedAt: Date?
+            var sentTerminate = false
+            var sentKill = false
             while process.isRunning {
                 if shouldInterrupt() || job.cancelled {
-                    process.interrupt()
-                    break
+                    if cancellationStartedAt == nil {
+                        cancellationStartedAt = Date()
+                        process.interrupt()
+                    } else if let started = cancellationStartedAt {
+                        let elapsed = Date().timeIntervalSince(started)
+                        if elapsed >= 2, !sentKill {
+                            sentKill = true
+                            _ = kill(process.processIdentifier, SIGKILL)
+                        } else if elapsed >= 1, !sentTerminate {
+                            sentTerminate = true
+                            process.terminate()
+                        }
+                    }
                 }
                 Thread.sleep(forTimeInterval: 0.05)
             }
+            process.waitUntilExit()
             exitCode = Int32(process.terminationStatus)
+            drainGroup.wait()
         } catch {
             exitCode = 1
         }
@@ -122,6 +141,10 @@ final class HostNodeRuntime: NodeRuntime {
         currentProcess?.interrupt()
     }
 
+    func requestCancel() {
+        interrupt()
+    }
+
     private static func which(_ name: String) -> String? {
         let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
         for dir in pathEnv.split(separator: ":") {
@@ -129,6 +152,23 @@ final class HostNodeRuntime: NodeRuntime {
             if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
         }
         return nil
+    }
+
+    private static func writeAll(_ data: Data, to fd: Int32) {
+        data.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            var written = 0
+            while written < raw.count {
+                let count = write(fd, base.advanced(by: written), raw.count - written)
+                if count > 0 {
+                    written += count
+                } else if count < 0, errno == EINTR {
+                    continue
+                } else {
+                    break
+                }
+            }
+        }
     }
 
     private static func resolveNodeBinary() -> String? {

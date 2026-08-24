@@ -1,0 +1,4 @@
+{"offloads":[
+  {"guest":"/usr/bin/node","host":"node-mobile"},
+  {"guest":"claude","basename":true}
+]}

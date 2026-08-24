@@ -288,6 +288,10 @@ public final class PipelineExecutor {
         let effectiveIn = shellState.stdinFD >= 0 ? shellState.stdinFD : (previousContext?.stdinFD ?? -1)
         let effectiveOut = shellState.stdoutFD >= 0 ? shellState.stdoutFD : (previousContext?.stdoutFD ?? -1)
         let effectiveErr = shellState.stderrFD >= 0 ? shellState.stderrFD : (previousContext?.stderrFD ?? -1)
+        let interactive = Self.isInteractiveSession(
+            stdin: effectiveIn, stdout: effectiveOut, stderr: effectiveErr,
+            inherited: previousContext?.interactive ?? false
+        )
 
         // Build the SpawnRequest
         let request = SpawnRequest(
@@ -297,14 +301,14 @@ public final class PipelineExecutor {
             stderrFD: effectiveErr,
             cwd: shellState.cwd,
             environment: tempEnv,
-            interactive: false
+            interactive: interactive
         )
 
         // Run inside a process context carrying the effective fds so fd-writing commands
         // honor redirections; fd-less contexts (host tests) fall back to the callback.
         let proc = VirtualProcess(
             pid: previousContext?.pid ?? -1, cwd: shellState.cwd, environ: tempEnv,
-            stdinFD: effectiveIn, stdoutFD: effectiveOut, stderrFD: effectiveErr, interactive: false
+            stdinFD: effectiveIn, stdoutFD: effectiveOut, stderrFD: effectiveErr, interactive: interactive
         )
         proc.stdoutWriter = { [weak self] text in self?.writeCallback(text) }
         proc.stderrWriter = { [weak self] text in self?.writeCallback(text) }
@@ -414,6 +418,9 @@ public final class PipelineExecutor {
             let environ = shellState.environ
             let cwd = shellState.cwd
             let stderrFD = shellState.stderrFD
+            let interactive = Self.isInteractiveSession(
+                stdin: stdinFD, stdout: stdoutFD, stderr: stderrFD, inherited: false
+            )
 
             Thread.detachNewThread { [weak self] in
                 guard let self else { group.leave(); return }
@@ -425,7 +432,7 @@ public final class PipelineExecutor {
 
                 let proc = VirtualProcess(
                     pid: Int32(capturedIndex + 1000), cwd: cwd, environ: environ,
-                    stdinFD: stdinFD, stdoutFD: stdoutFD, stderrFD: stderrFD, interactive: false
+                    stdinFD: stdinFD, stdoutFD: stdoutFD, stderrFD: stderrFD, interactive: interactive
                 )
                 proc.stdoutWriter = { [weak self] text in
                     if stdoutFD < 0 { self?.writeCallback(text) }
@@ -444,7 +451,7 @@ public final class PipelineExecutor {
                     stderrFD: stderrFD,
                     cwd: cwd,
                     environment: environ,
-                    interactive: false
+                    interactive: interactive
                 )
 
                 let code = self.registry.run(argv: expandedArgv, request: request, write: { output in
@@ -473,6 +480,16 @@ public final class PipelineExecutor {
     }
 
     // MARK: - Helpers
+
+    /// True when stdout/stderr are attached to a TTY (interactive shell session).
+    private static func isInteractiveSession(stdin: Int32, stdout: Int32, stderr: Int32,
+                                             inherited: Bool) -> Bool {
+        if inherited { return true }
+        if stdout >= 0, isatty(stdout) != 0 { return true }
+        if stderr >= 0, isatty(stderr) != 0 { return true }
+        if stdin >= 0, isatty(stdin) != 0 { return true }
+        return false
+    }
 
     private func resolvePath(_ path: String) -> String {
         if path.hasPrefix("/") { return path }

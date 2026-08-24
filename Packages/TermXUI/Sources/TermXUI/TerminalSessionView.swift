@@ -2,6 +2,7 @@
 import SwiftUI
 import UIKit
 import SwiftTerm
+import TermXFiles
 
 public struct TerminalSessionView: View {
     @ObservedObject private var session: TerminalSession
@@ -9,10 +10,21 @@ public struct TerminalSessionView: View {
     @State private var ctrlIsSticky = false
     @State private var fontSize: CGFloat = 14
     @State private var selectedFont: TerminalFont = .jetBrainsMono
+    /// Temporary testing affordance — remove with the Copy log button.
+    @State private var didCopyLog = false
 
-    public init(session: TerminalSession, theme: Binding<TerminalTheme> = .constant(.midnight)) {
+    /// Second ^C within ~2.5s — force embedded Node/Claude to exit.
+    private let onHardInterrupt: ((_ forceNodeSignal: Bool) -> Void)?
+
+    public init(
+        session: TerminalSession,
+        theme: Binding<TerminalTheme> = .constant(.midnight),
+        onHardInterrupt: ((_ forceNodeSignal: Bool) -> Void)? = nil
+    ) {
         self.session = session
         self._theme = theme
+        self.onHardInterrupt = onHardInterrupt
+        session.onHardInterrupt = onHardInterrupt
     }
 
     public var body: some View {
@@ -42,6 +54,23 @@ public struct TerminalSessionView: View {
                     .font(.system(.headline, design: .rounded))
                     .foregroundStyle(theme.palette.foreground)
             }
+            #if DEBUG
+            // Diagnostics stay available in development builds without adding
+            // testing controls to the shipped terminal UI.
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    UIPasteboard.general.string = session.copyableTranscript()
+                    didCopyLog = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        didCopyLog = false
+                    }
+                } label: {
+                    Image(systemName: didCopyLog ? "checkmark.circle.fill" : "doc.on.clipboard")
+                }
+                .accessibilityIdentifier("copyTerminalLog")
+                .accessibilityLabel(didCopyLog ? "Copied" : "Copy terminal log")
+            }
+            #endif
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
                     Picker("Theme", selection: $theme) {
@@ -130,7 +159,9 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
 
         func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
             guard let url = URL(string: link) else { return }
-            DispatchQueue.main.async { UIApplication.shared.open(url) }
+            DispatchQueue.main.async {
+                _ = SystemOpen.open(.url(url), origin: .guestLinux)
+            }
         }
 
         func clipboardCopy(source: TerminalView, content: Data) {

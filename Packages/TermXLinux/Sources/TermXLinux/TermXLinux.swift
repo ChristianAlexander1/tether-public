@@ -1,5 +1,6 @@
 import Foundation
 import TermXCore
+import TermXBlinkBridge
 
 // MARK: - Frozen Linux guest protocol (docs/06-linux-emulation.md)
 
@@ -32,16 +33,43 @@ public struct LinuxPathMapper {
 
     /// Validates a guest-visible path under `/workspaces`.
     public func validateGuestPath(_ path: String) throws -> String {
-        guard path.hasPrefix("/workspaces") else { throw LinuxGuestError.invalidGuestPath }
-        return path
+        guard path == guestWorkspacesPath || path.hasPrefix(guestWorkspacesPath + "/") else {
+            throw LinuxGuestError.invalidGuestPath
+        }
+
+        // Normalise dot components and reject paths which escape the mount. A
+        // prefix-only check accepts both `/workspaces-elsewhere` and
+        // `/workspaces/../../etc`, which would expose unrelated host files.
+        let normalised = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard normalised == guestWorkspacesPath || normalised.hasPrefix(guestWorkspacesPath + "/") else {
+            throw LinuxGuestError.invalidGuestPath
+        }
+        return normalised
     }
 
     /// Maps `/workspaces/<name>/…` to a host filesystem path for native reads.
     public func hostPath(forGuestPath guestPath: String) throws -> String {
-        _ = try validateGuestPath(guestPath)
-        let suffix = guestPath.dropFirst("/workspaces".count)
+        let validated = try validateGuestPath(guestPath)
+        let suffix = validated.dropFirst(guestWorkspacesPath.count)
         let trimmed = suffix.hasPrefix("/") ? String(suffix.dropFirst()) : String(suffix)
-        return workspacesHostRoot.appendingPathComponent(trimmed).path
+        let root = workspacesHostRoot.standardizedFileURL.resolvingSymlinksInPath()
+        let candidate = root.appendingPathComponent(trimmed).standardizedFileURL
+        guard candidate.path == root.path || candidate.path.hasPrefix(root.path + "/") else {
+            throw LinuxGuestError.invalidGuestPath
+        }
+
+        // `resolvingSymlinksInPath()` does not reliably resolve a symlink when
+        // the final leaf does not exist. Resolve the nearest existing ancestor
+        // so `/workspaces/link-to-outside/new-file` is rejected too.
+        var existingAncestor = candidate
+        while !FileManager.default.fileExists(atPath: existingAncestor.path), existingAncestor.path != root.path {
+            existingAncestor.deleteLastPathComponent()
+        }
+        let resolvedAncestor = existingAncestor.resolvingSymlinksInPath()
+        guard resolvedAncestor.path == root.path || resolvedAncestor.path.hasPrefix(root.path + "/") else {
+            throw LinuxGuestError.invalidGuestPath
+        }
+        return candidate.path
     }
 
     public var guestWorkspacesPath: String { "/workspaces" }
@@ -63,8 +91,9 @@ public enum AlpineBootstrap {
         let fm = FileManager.default
         try fm.createDirectory(at: rootfs, withIntermediateDirectories: true)
 
-        let marker = rootfs.appendingPathComponent(".termx-bootstrapped")
-        if fm.fileExists(atPath: marker.path) { return }
+        let marker = rootfs.appendingPathComponent(".tether-bootstrapped")
+        let legacyMarker = rootfs.appendingPathComponent(".termx-bootstrapped")
+        if fm.fileExists(atPath: marker.path) || fm.fileExists(atPath: legacyMarker.path) { return }
 
         let url = cdnURL(version: version)
         let (archive, _) = try await URLSession.shared.download(from: url)
@@ -229,6 +258,12 @@ public final class BlinkLinuxService: LinuxGuestRuntime {
         interrupted = true
         lock.unlock()
         runtime.interrupt()
+    }
+
+    /// True while the login shell (or any guest program) owns Blink's global machine.
+    /// A second `run()` during this window replaces the machine and kills the session.
+    public var isGuestMachineActive: Bool {
+        termx_blink_is_busy() != 0
     }
 
     public func runSync(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool) -> Int32 {

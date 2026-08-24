@@ -24,8 +24,37 @@ int termx_blink_run(const char *prog, char *const argv[], char *const envp[],
 /// Request cooperative interruption of the running guest (maps to SIGINT delivery).
 void termx_blink_interrupt(void);
 
+/// Non-zero while a guest program (e.g. the interactive login shell) owns g_machine.
+/// Starting another termx_blink_run while busy replaces the machine and crashes the session.
+int termx_blink_is_busy(void);
+
 /// Returns non-zero when the embedded Blink static library is linked.
 int termx_blink_is_available(void);
+
+/// Optional host callout for binaries that cannot run under Blink (e.g. Claude/Bun,
+/// full Node). When set, TermxExec asks the callback before loading a guest ELF;
+/// return 0 to accept the callout result in *exit_code_out, or non-zero to fall
+/// through to normal Blink emulation.
+///
+/// The callback always runs on a dedicated parent-process worker thread (never inside
+/// a Blink fork child), so Swift/NodeMobile stay safe. stdin/stdout/stderr are the
+/// host FDs corresponding to the guest's current stdio (redirect-aware).
+typedef int (*termx_host_exec_fn)(const char *prog, char *const argv[],
+                                  char *const envp[],
+                                  int stdin_fd, int stdout_fd, int stderr_fd,
+                                  int *exit_code_out, void *ctx);
+
+void termx_blink_set_host_exec(termx_host_exec_fn fn, void *ctx);
+
+/// Reset manifest-driven host proxy list (default: nothing proxied until entries added).
+void termx_blink_dispatch_reset(void);
+
+/// Register a basename (e.g. "node", "xdg-open") that should proxy to host_exec.
+/// Returns 0 on success, -1 if the table is full or name is invalid.
+int termx_blink_dispatch_add(const char *basename);
+
+/// Non-zero when prog's basename is registered for host proxy (manifest-driven).
+int termx_blink_dispatch_should_proxy(const char *prog);
 
 #ifdef __cplusplus
 }

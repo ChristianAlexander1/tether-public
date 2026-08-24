@@ -88,7 +88,7 @@ final class NodeTests: XCTestCase {
         let service = EmbeddedNodeService(spawnExecutor: recorder)
         let errPipe = Pipe()
         let code = await service.run(
-            argv: ["node", "-e", "const { execSync } = require('child_process'); console.log(execSync('echo postinstall').trim());"],
+            argv: ["node", "-e", "const { execSync } = require('child_process'); console.log(execSync('echo postinstall').toString().trim());"],
             cwd: tempDir.path,
             env: ["TERMX_INTERACTIVE": "0"],
             stdinFD: -1, stdoutFD: -1,
@@ -130,7 +130,7 @@ final class NodeTests: XCTestCase {
             )
         }
         try await Task.sleep(nanoseconds: 300_000_000)
-        service.interrupt()
+        service.interrupt(forceNodeSignal: false)
         let code = await task.value
         XCTAssertNotEqual(code, 0)
     }

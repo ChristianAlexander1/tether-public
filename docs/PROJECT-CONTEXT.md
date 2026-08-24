@@ -17,12 +17,16 @@ Claude Code locally against your project. It is built to be published on the App
 
 ## Architecture in one paragraph
 
-iOS forbids `fork`/`exec`, so **every command runs in-process** inside the app. `TermXCore`
-is the shell + command engine (each command is a function called on a thread with its own
-fds); `TermXUI` is SwiftTerm plus the pty; `TermXFiles` handles the security-scoped folder
-bookmarks. Python is embedded CPython 3.14 (BeeWare), Node is nodejs-mobile, and the Linux
-lane is the Blink x86-64 interpreter over an Alpine rootfs. Anything not found natively
-falls through to the Linux guest.
+iOS forbids real `fork`/`exec` at the OS level. Tether runs a **guest Linux platform**
+(Alpine + Blink) as the primary terminal: **`apk add` installs real ELFs; default exec is
+always guest**. Two **generic** host bridges only: (1) URL opener class for `xdg-open`/
+`open` — any https URL; (2) manifest-listed host runtimes for app stubs (node/npm/claude)
+that are not guest binaries. Embedded Node CLIs use `@tether/shim` → generic spawn/PATH —
+not per-app hardcoding. See **`docs/GUEST-PLATFORM.md`** for the full contract.
+
+Internal modules may still be named `TermX*`; the product name is **Tether**.
+
+**Docs:** `GUEST-PLATFORM.md` · `00-MASTER-PLAN.md` · `agent-briefs/` for offline component work
 
 ## Hard-won rules (breaking these has broken the app before)
 
@@ -51,25 +55,24 @@ all input after a job; the external-command adapter slurping a tty to EOF; `prin
 writing its output; backslashes stripped inside double quotes; script variables invisible
 to later expansions.
 
-## Current state (2026-08-22)
+## Current state (2026-08-24)
 
-Working and verified on the Simulator: the shell (pipes, redirects, globs, conditionals,
-loops, functions, here-docs, job control), `python3`/`pip`, `node`/`npm`, the Linux lane
-(`apk add git` → `git version 2.45.4`, runnable by bare name), the folder picker, and the
-Licenses screen. 220 tests green across nine packages.
+Simulator-verified: Alpine login shell, `apk add`, manifest host stubs (`node`/`claude`/`open`),
+double-^C cancel, copy diagnostic log, in-app OAuth Safari (spawn opener primary path in progress).
 
-Not done: writing into the picked workspace from guest programs; `linux /bin/sh -c` is
-unreliable; `claude` login end-to-end; the physical-device checklist.
+**Active work:** see `13-parallel-agent-plan.md` — ios-linuxkit-class Linux engine, full
+native command tier, WASM, terminal TUI fixes, Claude login e2e, device pass.
 
 ## Where to look
 
 | Question | File |
 |---|---|
+| What is the guest platform contract? | `GUEST-PLATFORM.md` |
 | How do I run and test it? | `../HOW-TO-RUN.md` |
 | What can users type, and how do they install/remove things? | `USER-GUIDE.md` |
 | What is verified working, and what bugs were fixed? | `../STATUS-AND-REWORK.md` |
-| What work is left, for a Mac agent? | `10-remaining-work.md` |
-| What work can an agent without the repo do? | `11-offline-agent-work.md` |
+| What work is left, for a Mac agent? | `10-remaining-work.md`, `agent-briefs/I1–I3` |
+| What work can an agent without the repo do? | `agent-briefs/P1–P12` |
 | The frozen APIs between components | `09-integration-contracts.md` |
 | Licensing rules for new dependencies | `07-appstore-licensing.md` |
 | Physical-device checklist | `DEVICE-PASS.md` |

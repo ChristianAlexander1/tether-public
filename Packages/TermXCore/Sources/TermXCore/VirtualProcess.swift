@@ -59,7 +59,9 @@ public final class VirtualProcess: @unchecked Sendable {
     public func deliverSignal(_ sig: Int32) {
         lock.lock()
         if Self.interruptingSignals.contains(sig) { isSignalled = true }
-        if Self.terminatingSignals.contains(sig) { shouldTerminate = true }
+        // We already own `lock`; assigning through the public property would try
+        // to acquire the same non-recursive lock again and deadlock on SIGTERM.
+        if Self.terminatingSignals.contains(sig) { _shouldTerminate = true }
         let handler = signalHandlers[sig]
         lock.unlock()
         handler?()

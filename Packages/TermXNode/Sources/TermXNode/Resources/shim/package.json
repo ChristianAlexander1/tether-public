@@ -1,8 +1,7 @@
 {
-  "name": "@termx/shim",
+  "name": "@tether/shim",
   "version": "1.0.0",
-  "description": "Node.js env shim for TermX: replaces child_process with a JSON IPC channel to the app's in-process command engine, plus os/tty overrides.",
-  "type": "commonjs",
+  "description": "Node child_process / os / tty replacement that forwards spawns over a host IPC pipe",
   "main": "index.js",
   "license": "MIT",
   "scripts": {
@@ -10,5 +9,10 @@
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "LICENSE"
+  ]
 }

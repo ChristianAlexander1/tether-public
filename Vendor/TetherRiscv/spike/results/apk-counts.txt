@@ -1,0 +1,12 @@
+# Tether P8 — Alpine v3.24 apk package availability, riscv64 vs x86_64
+# (counted from APKINDEX of 2026-08-23/24, dl-cdn.alpinelinux.org)
+repo        x86_64  riscv64
+main         5961    5912   ( 99.2%)
+community   22678   20868   ( 92.0%)
+TOTAL       28639   26780   ( 93.5%)  -> 1857 pkgs missing on riscv64, 7 riscv64-only
+
+Notable on riscv64:  gcc, musl-dev, go, nodejs+npm, python3+py3-pip, php84,
+                     mariadb, postgresql17, nginx, openjdk21-jdk, llvm20 (libs)
+Missing on riscv64:  rustc (cargo pkg exists, no compiler), clang, chromium,
+                     dotnet8/10, xen, open-cloud/open-vm-tools, kubo, typst
+riscv64-only:        opensbi, u-boot (starfive/unleashed/unmatched), binutils-x86_64

@@ -209,6 +209,15 @@ final class CoreTests: XCTestCase {
         XCTAssertFalse(proc.interrupted)
     }
 
+    func testVirtualProcessSIGTERMRequestsTermination() {
+        let proc = VirtualProcess(pid: 43, cwd: "/tmp", environ: [:], stdinFD: -1, stdoutFD: -1, stderrFD: -1, interactive: false)
+        let table = ProcessTable()
+        table.register(proc)
+        XCTAssertTrue(table.signal(43, SIGTERM))
+        XCTAssertTrue(proc.shouldTerminate)
+        XCTAssertFalse(proc.interrupted)
+    }
+
     func testPIDAllocator() {
         let allocator = PIDAllocator()
         let p1 = allocator.allocate()

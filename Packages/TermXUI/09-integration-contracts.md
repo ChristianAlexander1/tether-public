@@ -117,7 +117,7 @@ already-real paths in `cwd` and never call C3 directly.
 ```swift
 public protocol NodeService {
     /// Runs a Node program to completion. argv[0] is the script path ("npm", "claude"
-    /// resolve via $HOME/node). Exactly one job runs at a time in v1; queue internally.
+    /// resolve via $HOME/node). Serialize or isolate concurrent jobs; queue when needed.
     func run(argv: [String], cwd: String, env: [String: String],
              stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
              interactive: Bool) async -> Int32            // exit code

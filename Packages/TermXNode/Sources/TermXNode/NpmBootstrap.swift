@@ -57,6 +57,15 @@ enum NpmBootstrap {
         defer { try? fm.removeItem(at: staging) }
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
 
+        let tick = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
+        tick.schedule(deadline: .now() + 1.0, repeating: 1.0)
+        tick.setEventHandler {
+            let secs = Int(Date().timeIntervalSince(extractStarted))
+            progress("  … still extracting (\(secs)s)\n")
+        }
+        tick.resume()
+        defer { tick.cancel() }
+
         // Skip docs/man — npm never needs them at runtime; cuts ~270 members.
         try TarGzExtractor.extract(archive: archive, into: staging) { name in
             if name.hasPrefix("package/man/") { return false }
@@ -128,7 +137,7 @@ enum NpmBootstrap {
         }
 
         // Tick even at 0 bytes so a DNS/TLS stall is visible, not a silent hang.
-        let progressQueue = DispatchQueue(label: "com.termx.npm.download.progress")
+        let progressQueue = DispatchQueue(label: "app.tether.npm.download.progress")
         var lastReported: Int64 = -1
         var ticks = 0
         let ticker = DispatchSource.makeTimerSource(queue: progressQueue)

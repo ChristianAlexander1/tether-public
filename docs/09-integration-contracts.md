@@ -117,7 +117,7 @@ already-real paths in `cwd` and never call C3 directly.
 ```swift
 public protocol NodeService {
     /// Runs a Node program to completion. argv[0] is the script path ("npm", "claude"
-    /// resolve via $HOME/node). Exactly one job runs at a time in v1; queue internally.
+    /// resolve via $HOME/node). Serialize or isolate concurrent jobs; queue when needed.
     func run(argv: [String], cwd: String, env: [String: String],
              stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
              interactive: Bool) async -> Int32            // exit code
@@ -134,11 +134,33 @@ via a native binding, plus `os.platform() -> "darwin"`, `tty.isatty -> interacti
 "entry": "symbol-or-path", "framework": "TermXPython" }`. C2 loads all manifests found
 under each package's `Resources/registry.json`.
 
+### 2.7 Guest exec dispatch manifest (C6 owns schema; C4b/C3 consume handlers)
+
+`Resources/tether_dispatch_manifest.json` in app bundle:
+
+```json
+{
+  "default": "guest_elf",
+  "browser_openers": ["open", "xdg-open", "gnome-open", "kde-open", "sensible-browser"],
+  "host_runtimes": [
+    { "match": "basename", "name": "node", "handler": "node-mobile" },
+    { "match": "basename", "name": "npm",  "handler": "node-mobile" },
+    { "match": "basename", "name": "npx",  "handler": "node-mobile" },
+    { "match": "basename", "name": "claude", "handler": "node-mobile" }
+  ]
+}
+```
+
+**Rules:** `default` is always guest ELF. Never add apk-installed tools (`git`, `python3`,
+`gcc`, …) to `host_runtimes`. URL openers delegate to C3 `SystemOpen` for **any** https URL.
+Full contract: `GUEST-PLATFORM.md`.
+
 ### 2.6 Environment defaults (C2 sets; others rely on)
 
 ```
 HOME=<sandbox>/Documents      PATH=/bin:$HOME/wasm/bin:$HOME/node/bin:$HOME/python/bin
 TERM=xterm-256color           LANG=en_US.UTF-8
+DISPLAY=:0                    WAYLAND_DISPLAY=tether   BROWSER=open   # guest Linux session
 PYTHONHOME/PYTHONPATH per C4a   NODE_PATH/npm_config_prefix per C4b
 ```
 

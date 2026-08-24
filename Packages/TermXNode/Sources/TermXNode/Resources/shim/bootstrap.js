@@ -50,6 +50,8 @@ process.exit = function trappedExit(code) {
 let scriptFinish = null;
 /** Set after intake socket is created — passed to lifecycle teardown. */
 let intakeSocket = null;
+/** Abort hook for the currently running job (cancel from Swift). */
+let abortRunningJob = null;
 
 function finishScript(code) {
   if (!scriptFinish) return;
@@ -65,7 +67,7 @@ process.on('uncaughtException', (err) => {
     finishScript(err.termxExitCode);
     return;
   }
-  const message = String(err && err.stack ? err.stack : err);
+  const message = sanitizeHostPaths(String(err && err.stack ? err.stack : err));
   try { process.stderr.write(message + '\n'); } catch (_) { /* ignore */ }
   finishScript(1);
 });
@@ -75,10 +77,16 @@ process.on('unhandledRejection', (reason) => {
     finishScript(reason.termxExitCode);
     return;
   }
-  const message = String(reason && reason.stack ? reason.stack : reason);
+  const message = sanitizeHostPaths(String(reason && reason.stack ? reason.stack : reason));
   try { process.stderr.write('Unhandled rejection: ' + message + '\n'); } catch (_) { /* ignore */ }
   finishScript(1);
 });
+
+function sanitizeHostPaths(text) {
+  return String(text)
+    .replace(/\/Users\/[^/\s:'"]+/g, '/Users/<host>')
+    .replace(/Host-Machine\.local/gi, 'tether.local');
+}
 
 async function runJob(job, onDone) {
   const prevCwd = process.cwd();
@@ -86,10 +94,22 @@ async function runJob(job, onDone) {
   const reply = (obj) => {
     if (replied) return;
     replied = true;
-    lifecycle.finishJob(intakeSocket, ipc);
+    // Reply BEFORE teardown — finishJob closes leftover handles and can
+    // destroy the job-reply pipe FD, which left Claude/npm failures hanging
+    // the host forever (no exit code → shell stuck).
     try { process.chdir(prevCwd); } catch (_) { /* ignore */ }
     writeReply(obj);
+    try { lifecycle.finishJob(intakeSocket, ipc); } catch (_) { /* ignore */ }
     onDone();
+  };
+
+  abortRunningJob = () => {
+    if (replied) return;
+    if (scriptFinish) {
+      finishScript(130);
+    } else {
+      reply({ exitCode: 130 });
+    }
   };
 
   try {
@@ -97,9 +117,13 @@ async function runJob(job, onDone) {
     if (job.env) {
       for (const [k, v] of Object.entries(job.env)) process.env[k] = v;
     }
+    process.env.TETHER_INTERACTIVE = job.interactive ? '1' : '0';
     process.env.TERMX_INTERACTIVE = job.interactive ? '1' : '0';
 
     lifecycle.bindStdinFromJob(job);
+    if (job.interactive) {
+      lifecycle.enableLiveOutput();
+    }
 
     if (process.env.TERMX_IPC_SOCKET) {
       await ipc.connect();
@@ -220,10 +244,12 @@ if (jobFD >= 0 && jobReplyFD >= 0) {
     intake.unref();
     const job = queue.shift();
     runJob(job, () => {
+      abortRunningJob = null;
       running = false;
       intake.ref();
       setTimeout(() => startNext(), 0);
     }).catch((jobErr) => {
+      abortRunningJob = null;
       running = false;
       intake.ref();
       writeReply({ exitCode: 1, error: String(jobErr) });
@@ -238,11 +264,18 @@ if (jobFD >= 0 && jobReplyFD >= 0) {
       const line = partial.slice(0, idx).trim();
       partial = partial.slice(idx + 1);
       if (line) {
+        let parsed;
         try {
-          queue.push(JSON.parse(line));
+          parsed = JSON.parse(line);
         } catch (e) {
           writeReply({ exitCode: 1, error: 'bad job line: ' + String(e) });
+          continue;
         }
+        if (parsed.kind === 'cancel') {
+          if (abortRunningJob) abortRunningJob();
+          continue;
+        }
+        queue.push(parsed);
       }
     }
     startNext();

@@ -1,0 +1,18 @@
+{
+  "default": "guest_elf",
+  "browser_openers": [
+    "open",
+    "xdg-open",
+    "gnome-open",
+    "kde-open",
+    "sensible-browser",
+    "wslview"
+  ],
+  "host_runtimes": [
+    { "match": "basename", "name": "node", "handler": "node-mobile" },
+    { "match": "basename", "name": "npm", "handler": "node-mobile" },
+    { "match": "basename", "name": "npx", "handler": "node-mobile" },
+    { "match": "basename", "name": "claude", "handler": "node-mobile" },
+    { "match": "basename", "name": "wasm", "handler": "wasm3" }
+  ]
+}

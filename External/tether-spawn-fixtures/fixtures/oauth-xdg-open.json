@@ -1,0 +1,7 @@
+{
+  "name": "oauth-xdg-open",
+  "description": "OAuth opener selected when BROWSER is absent",
+  "env": { "DISPLAY": ":0" },
+  "spawn": { "kind": "spawn", "file": "xdg-open", "args": ["https://claude.com/cai/oauth/authorize?client_id=fixture"], "cwd": "/work", "env": { "DISPLAY": ":0" }, "interactive": false },
+  "expect": { "exit": 0 }
+}

@@ -4,7 +4,7 @@ import NodeMobileBridge
 #endif
 
 /// iOS nodejs-mobile runtime. Starts `node_start()` once on a dedicated thread with
-/// `bootstrap.js` + `@termx/shim` preload; jobs are serialized by `EmbeddedNodeService`.
+/// `bootstrap.js` + `@tether/shim` preload; jobs are serialized by `EmbeddedNodeService`.
 final class NodeMobileRuntime: NodeRuntime {
     #if os(macOS)
     private let hostFallback: HostNodeRuntime
@@ -19,6 +19,10 @@ final class NodeMobileRuntime: NodeRuntime {
 
     func interrupt() {
         hostFallback.interrupt()
+    }
+
+    func requestCancel() {
+        hostFallback.requestCancel()
     }
     #else
     private let spawnExecutor: SpawnExecuting
@@ -52,7 +56,9 @@ final class NodeMobileRuntime: NodeRuntime {
         defer { server.stop() }
 
         var env = job.env
+        env["TETHER_IPC_SOCK"] = server.path
         env["TERMX_IPC_SOCKET"] = server.path
+        env["TETHER_INTERACTIVE"] = job.interactive ? "1" : "0"
         env["TERMX_INTERACTIVE"] = job.interactive ? "1" : "0"
 
         guard let payload = Self.makeBootstrapPayload(from: job, env: env),
@@ -72,7 +78,11 @@ final class NodeMobileRuntime: NodeRuntime {
             }
             guard wrote == request.count else { return 1 }
 
-            guard let reply = Self.readReply(from: jobReadFD, shouldInterrupt: shouldInterrupt) else {
+            guard let reply = Self.readReply(
+                from: jobReadFD,
+                interactive: job.interactive,
+                shouldInterrupt: shouldInterrupt
+            ) else {
                 return job.cancelled ? 130 : 1
             }
             if let err = reply["error"] as? String, !err.isEmpty {
@@ -92,6 +102,14 @@ final class NodeMobileRuntime: NodeRuntime {
         termx_node_request_interrupt()
     }
 
+    func requestCancel() {
+        guard jobWriteFD >= 0 else { return }
+        let line = Data("{\"kind\":\"cancel\"}\n".utf8)
+        _ = line.withUnsafeBytes { raw in
+            write(jobWriteFD, raw.baseAddress!, line.count)
+        }
+    }
+
     private enum EngineStartResult {
         case success
         case failure(String)
@@ -103,7 +121,7 @@ final class NodeMobileRuntime: NodeRuntime {
         if engineStarted { return .success }
 
         guard let shim = NodeShim.preloadPath, let bootstrap = NodeShim.bootstrapPath else {
-            return .failure("node: @termx/shim resources missing from bundle\n")
+            return .failure("node: @tether/shim resources missing from bundle\n")
         }
 
         guard let jobPipe = NodePipe.pair(), let replyPipe = NodePipe.pair() else {
@@ -141,9 +159,9 @@ final class NodeMobileRuntime: NodeRuntime {
             return .failure("node: node_start thread failed to launch (rc=\(rc))\n")
         }
 
-        guard let ready = Self.readReply(from: jobReadFD, shouldInterrupt: { false }),
+        guard let ready = Self.readReply(from: jobReadFD, interactive: false, shouldInterrupt: { false }),
               ready["ready"] as? Bool == true else {
-            let err = (try? Self.readReply(from: jobReadFD, shouldInterrupt: { false }))?["error"] as? String
+            let err = (try? Self.readReply(from: jobReadFD, interactive: false, shouldInterrupt: { false }))?["error"] as? String
             return .failure(err ?? "node: embedded engine did not become ready\n")
         }
 
@@ -218,13 +236,26 @@ final class NodeMobileRuntime: NodeRuntime {
         return payload
     }
 
-    private static func readReply(from fd: Int32, shouldInterrupt: @escaping () -> Bool) -> [String: Any]? {
+    private static func readReply(
+        from fd: Int32,
+        interactive: Bool,
+        shouldInterrupt: @escaping () -> Bool
+    ) -> [String: Any]? {
         guard fd >= 0 else { return nil }
         var buffer = Data()
         var chunk = [UInt8](repeating: 0, count: 4096)
+        var cancelWaitStart: Date?
         while true {
             if shouldInterrupt() {
-                termx_node_request_interrupt()
+                if interactive {
+                    if cancelWaitStart == nil { cancelWaitStart = Date() }
+                    if Date().timeIntervalSince(cancelWaitStart!) > 8.0 { return nil }
+                } else {
+                    termx_node_request_interrupt()
+                    return nil
+                }
+            } else {
+                cancelWaitStart = nil
             }
             let n = read(fd, &chunk, chunk.count)
             if n < 0 {

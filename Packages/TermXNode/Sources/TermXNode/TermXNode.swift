@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 import TermXCore
 
 // MARK: - Frozen NodeService protocol (09-integration-contracts.md §2.4)
@@ -7,10 +10,10 @@ public protocol NodeService: AnyObject {
     func run(argv: [String], cwd: String, env: [String: String],
              stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
              interactive: Bool) async -> Int32
-    func interrupt()
+    func interrupt(forceNodeSignal: Bool)
 }
 
-// MARK: - Spawn bridge consumed by @termx/shim IPC
+// MARK: - Spawn bridge consumed by @tether/shim IPC
 
 public struct RecordedSpawn: Equatable, Sendable {
     public let file: String
@@ -99,7 +102,7 @@ public final class RegistrySpawnExecutor: SpawnExecuting {
 // MARK: - Embedded Node service
 
 public final class EmbeddedNodeService: NodeService {
-    private let queue = DispatchQueue(label: "com.termx.node.jobs", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "app.tether.node.jobs", qos: .userInitiated)
     private let runtime: NodeRuntime
     private var currentJob: NodeRunningJob?
     private var interrupted = false
@@ -123,7 +126,12 @@ public final class EmbeddedNodeService: NodeService {
                 self.interrupted = false
                 self.lock.unlock()
 
-                let mergedEnv = NodeEnvironment.merge(base: env, cwd: cwd)
+                var mergedEnv = NodeEnvironment.merge(base: env, cwd: cwd, interactive: interactive)
+                if Self.isNpmVersionProbe(argv) {
+                    // Avoid ora/progress spinners on a sub-second version probe.
+                    mergedEnv["npm_config_progress"] = "false"
+                    mergedEnv["npm_config_loglevel"] = "warn"
+                }
                 let home = mergedEnv["HOME"] ?? NSHomeDirectory() + "/Documents"
 
                 // npm/npx bootstrap on first use, and bin-name resolution
@@ -167,24 +175,44 @@ public final class EmbeddedNodeService: NodeService {
                     return self?.interrupted ?? false
                 }
                 self.currentJob = nil
+                if interactive {
+                    // Belt-and-suspenders: clear any stuck ora spinner line on the PTY.
+                    Self.writeFD(stderrFD, "\u{1B}[?25h\u{1B}[2K\r")
+                }
                 continuation.resume(returning: code)
             }
         }
     }
 
-    public func interrupt() {
+    public func interrupt(forceNodeSignal: Bool = false) {
         lock.lock()
         interrupted = true
         let job = currentJob
         lock.unlock()
-        job?.cancel()
-        runtime.interrupt()
+        guard let job else { return }
+        job.cancel()
+        if forceNodeSignal || !job.interactive {
+            if job.interactive {
+                runtime.requestCancel()
+            } else {
+                runtime.interrupt()
+            }
+        }
+    }
+
+    private static func isNpmVersionProbe(_ argv: [String]) -> Bool {
+        guard let first = argv.first else { return false }
+        guard (first as NSString).lastPathComponent == "npm" else { return false }
+        let args = Array(argv.dropFirst())
+        return args == ["--version"] || args == ["-v"]
     }
 
     private static func writeFD(_ fd: Int32, _ text: String) {
         guard fd >= 0 else { return }
         text.withCString { ptr in
-            _ = write(fd, ptr, strlen(ptr))
+            let len = strlen(ptr)
+            _ = write(fd, ptr, len)
+            _ = fsync(fd)
         }
     }
 
@@ -223,7 +251,8 @@ public enum NodeShim {
 }
 
 public enum NodeEnvironment {
-    public static func merge(base: [String: String], cwd: String, home: String? = nil) -> [String: String] {
+    public static func merge(base: [String: String], cwd: String, home: String? = nil,
+                             interactive: Bool = false) -> [String: String] {
         let resolvedHome = home ?? base["HOME"] ?? NSHomeDirectory() + "/Documents"
         var env = base
         env["HOME"] = resolvedHome
@@ -233,12 +262,19 @@ public enum NodeEnvironment {
         env["TERM"] = env["TERM"] ?? "xterm-256color"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
         env["PWD"] = cwd
-        // Embedded terminal defaults: skip interactive noise that adds latency
-        // without changing install correctness. Callers can still override.
+        let interactiveValue = interactive ? "1" : (env["TETHER_INTERACTIVE"] ?? env["TERMX_INTERACTIVE"] ?? "0")
+        env["TETHER_INTERACTIVE"] = interactiveValue
+        env["TERMX_INTERACTIVE"] = interactiveValue
+        // Quiet defaults for harness/CI; interactive terminal gets live npm output.
         env["npm_config_update_notifier"] = env["npm_config_update_notifier"] ?? "false"
         env["npm_config_fund"] = env["npm_config_fund"] ?? "false"
         env["npm_config_audit"] = env["npm_config_audit"] ?? "false"
+        // npm ora spinners (progress=true) use setInterval + \\r redraws that often
+        // never stop cleanly in the embedded engine — use loglevel=info lines instead.
         env["npm_config_progress"] = env["npm_config_progress"] ?? "false"
+        if interactive {
+            env["npm_config_loglevel"] = env["npm_config_loglevel"] ?? "info"
+        }
         env["npm_config_fetch_retries"] = env["npm_config_fetch_retries"] ?? "2"
         env["npm_config_fetch_retry_mintimeout"] = env["npm_config_fetch_retry_mintimeout"] ?? "5000"
         env["npm_config_fetch_retry_maxtimeout"] = env["npm_config_fetch_retry_maxtimeout"] ?? "20000"

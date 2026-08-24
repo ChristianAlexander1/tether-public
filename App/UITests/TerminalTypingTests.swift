@@ -5,25 +5,25 @@ import XCTest
 final class TerminalTypingTests: XCTestCase {
     func testShellExecutesTypedCommands() {
         let app = XCUIApplication()
-        app.launchEnvironment["TERMX_AUTOWORKSPACE"] = "1"
+        // Real user mode: open a workspace, no AUTOCOMMAND harness — type like a person.
+        app.launchEnvironment["TETHER_AUTOWORKSPACE"] = "1"
         app.launch()
-        sleep(4)
+        sleep(8) // allow Alpine bootstrap + login banner
 
-        // Tap once to focus the terminal, then send every line in one event batch —
-        // repeated accessibility snapshots of the terminal canvas time out in XCUITest.
         app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         sleep(2)
+        // Guest-first Alpine: workspace is /work. BusyBox ash understands these.
         app.typeText(
+            "uname -a > uname.txt\n" +
             "echo proof-of-execution-42 > proof.txt\n" +
             "mkdir made-by-shell\n" +
-            "echo hello | grep hell > piped.txt\n" +
-            "echo $((6*7)) > math.txt\n" +
+            "pwd > pwd.txt\n" +
             "ls\n"
         )
-        sleep(4)
+        sleep(8)
 
         let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "terminal-after-commands"
+        shot.name = "terminal-after-linux-commands"
         shot.lifetime = .keepAlways
         add(shot)
     }

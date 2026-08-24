@@ -1,81 +1,81 @@
 # C8 — Roadmap & Agent Work Split
 
-**Goal:** Ship in clean milestones, with components parallelized across agents. Every
-milestone ends in something that runs on a device.
+**Goal:** Ship the **complete** product — all lanes, all integrations, App Store ready.
+Milestones run in parallel where possible; see `13-parallel-agent-plan.md` for offline tracks.
 
-## Milestones
+## Milestones (all required)
 
-### M1 — Walking skeleton  *(the "it's real" moment)*
-- Xcode project + SwiftUI shell app, TestFlight-able
-- C1: SwiftTerm view + pty + resize + basic key toolbar
-- C3: folder picker + bookmark persistence + workspace launcher screen
-- C2: forked ios_system building as xcframework; dispatcher runs `ls/cat/echo/cd` with
-  pipes & redirects via interim mini-parser
-- ✔ Demo: open a folder, `ls | grep foo > out.txt`, relaunch app, access persists
+### M1 — Walking skeleton
+- Xcode project + SwiftUI shell
+- C1: SwiftTerm + pty + resize + key toolbar
+- C3: folder picker + bookmark persistence
+- C2: dispatcher runs core commands with pipes & redirects
+- ✔ Demo: open folder, `ls | grep foo > out.txt`, relaunch, access persists
 
-### M2 — Real shell
-- mksh port on the VirtualProcess model; history, completion, .profile
-- Job control, Ctrl-C, `&`, `jobs`
-- ripgrep/fd/jq native ports; command registry v1 (~200 commands)
-- Tabs, themes, fonts, hardware keyboard polish
-- ✔ Demo: write & run a shell script with loops and functions; vim a file
+### M2 — Full shell + native command tier
+- mksh-class shell: history, completion, `.profile`, job control, Ctrl-C/Z
+- ios_system xcframework + lg2 `git` + native `rg`/`fd`/`jq`
+- TermXCommands wired (200+ commands)
+- Tabs, themes, fonts, hardware keyboard
+- ✔ Demo: shell scripts with loops/functions; vim a file; `git commit`
 
 ### M3 — Runtimes
-- CPython xcframework + pip (+ wheel index for binary wheels)
-- nodejs-mobile engine + Node service + stdio/tty bridge
-- `@termx/shim` child_process layer; **e2e: `npm install` a real package tree**
-- ✔ Demo: `pip install rich` + run script; `npm init -y && npm i chalk` + run script
+- CPython xcframework + pip + iOS wheel index
+- nodejs-mobile + Node service + full `@tether/shim` (generic spawn + openers)
+- ✔ Demo: `pip install rich`; `npm init -y && npm i chalk`; `node-gyp` documented path
 
-### M4 — Claude Code  *(the headline)*
-- `claude` launcher: first-run npm install flow, login flow (browser session / token)
-- Shim hardening against Claude Code's spawn/os/tty usage; Esc/interrupt; git via lg2
-- ✔ Demo: open project folder → `claude` → agent edits files, runs tests, commits
+### M4 — Claude Code (headline)
+- `claude` launcher, npm install, OAuth login, TUI rendering
+- Shim covers all spawn patterns; Esc/double-Ctrl-C interrupt
+- Route 2: `linux claude` via Blink where useful
+- Route 3: TermX Agent skeleton (API-key + OAuth)
+- ✔ Demo: open project → `claude` → edits files, runs tests, commits
 
-### M5 — Linux lane
-- Blink port (interpreter mode) + syscall/path patches
-- Alpine minirootfs bootstrapper + `linux` command + PATH fallthrough
-- ✔ Demo: `linux apk add cowsay figlet gcc` … and `linux` running the official Linux
-  build of claude as Route-2 fallback
+### M5 — Linux engine (ios-linuxkit parity)
+- Blink iOS + optional libriscv bake-off
+- fakefs rootfs packaging (P4)
+- Bind mounts: `/work` + `/workspaces/<name>`
+- **Manifest exec dispatch (P5)** — replace hardcoded host lists; see `GUEST-PLATFORM.md`
+- Harness acceptance suite (P7): BusyBox, apk top-200, pipelines, fork stress
+- ✔ Demo: `apk add gcc python3 openssh`; build and run guest program; workspace R/W
 
-### M6 — Ship
-- Licenses screen (generated), privacy label, review notes + demo video (C7 playbook)
-- Onboarding (60-second tour), app icon/brand, App Store page
-- Beta hardening: crash reporting (local, privacy-clean), perf passes
-- Submit → respond → launch 🚀
+### M6 — WASM + terminal polish
+- wasm3/WASI runner + `~/wasm/bin`
+- Terminal: DEC 2031, 80-col default, bracketed paste (P9)
+- Ghostty Web evaluation / integration if beats SwiftTerm for TUIs
+- ✔ Demo: install wasm `rg`; Claude Code TUI clean at 120 cols
 
-### Post-1.0 seeds
-- TermX Agent native UI (C5 Route 3) as premium feature
-- Files.app provider for $HOME; iPad side-by-side agent+terminal
-- RISC-V engine bake-off; SSH client command polish (`ssh`, `mosh`-alt)
-- Mac Catalyst build (nearly free) → same app on Mac
+### M7 — Ship
+- Licenses screen, privacy label, review notes + demo video
+- Physical device pass (iPhone + iPad)
+- App Store submission — **full feature set enabled**
+- Crash reporting (local), perf passes
 
-## Suggested agent assignments (parallel tracks)
+## Agent assignments
 
-| Agent | Owns | First task | Depends on |
+| Agent | Owns | Track | Depends on |
 |---|---|---|---|
-| **A1 UI** | C1 | SwiftTerm+pty demo package with echo engine | nothing |
-| **A2 Core** | C2 | ios_system fork building in workspace + dispatcher API (`termx_run`) | nothing |
-| **A3 Files** | C3 | WorkspaceManager + picker + bookmark tests | nothing |
-| **A4 Runtimes** | C4 | CPython xcframework via BeeWare scripts | A2's API stub |
-| **A5 Node/Claude** | C4-node + C5 | nodejs-mobile build + shim spec | A2's VirtualProcess API |
-| **A6 Linux** | C6 | Blink compiling for iOS, run BusyBox `echo` in simulator | nothing |
-| **A7 Release** | C7 + M6 | NOTICES tooling + review-notes draft | ongoing |
+| **Online P1–P12** | Standalone packages | `13-parallel-agent-plan.md` | nothing (parallel) |
+| **A1 UI** | C1 + P9 terminal | SwiftTerm / Ghostty | nothing |
+| **A2 Core** | C2 + P1/P2 merge | ios_system + shell | P1, P2 deliverables |
+| **A3 Files** | C3 | bookmarks, mounts | nothing |
+| **A4 Python** | C4-python | CPython + pip | A2 API |
+| **A5 Node/Claude** | C4-node + C5 + P3/P10 | nodejs-mobile, claude | A2 API, P3 |
+| **A6 Linux** | C6 + P4/P5/P7/P8 | Blink, fakefs, harness | P4, P5, P7 |
+| **A7 Release** | C7 + M7 + P11 docs | legal, submission | ongoing |
+| **Integrator** | I1–I3 | Xcode, Simulator, device | all tracks |
 
-Integration owner (you + main agent): owns the Xcode workspace, the `termx_run` /
-VirtualProcess API contract between A1/A2/A5 (freeze it early — it's the only hot
-interface), and weekly on-device integration builds.
+## Interface contracts (frozen — see 09-integration-contracts.md)
 
-## Interface contracts to freeze in week 1
+1. `termx_run(cmdline, stdin_fd, stdout_fd, stderr_fd, cwd, env[]) -> exit_code` + cancel
+2. `WorkspaceManager.resolve(path)` + mount-table semantics
+3. Command registry JSON schema
+4. Node service job API + `@tether/shim` IPC keys
+5. `termx_blink_mount(host, guest)` + **`tether_dispatch_manifest.json`** (P5)
 
-1. `termx_run(cmdline, stdin_fd, stdout_fd, stderr_fd, cwd, env[]) -> exit_code` + async
-   variant with cancellation token (A1↔A2, A5↔A2).
-2. `WorkspaceManager.resolve(path)` + mount-table semantics (A2↔A3).
-3. Command registry JSON schema (A2↔A4↔A6).
-4. Node service job API: `runNode(argv, cwd, env, fds, requireShim) -> exitCode` (A5).
+## Definition of done
 
-## Definition of done (per component)
-
-- Builds as its own Swift package / xcframework with tests green in CI (GitHub Actions,
-  macOS runner, simulator tests).
-- On-device smoke test checklist in the component doc updated.
-- No red-list licenses (check against 07 doc) — CI script greps SPDX headers of new deps.
+- Builds green in CI (macOS runner + simulator tests)
+- Track acceptance criteria in `13-parallel-agent-plan.md` met
+- No red-list licenses (`07-appstore-licensing.md`)
+- `docs/LIMITATIONS.md` updated — gap closed or explicitly owned

@@ -1,0 +1,41 @@
+# Tether P8 bench 2026-08-24 04:13:53 UTC
+Linux 6.1.158+ x86_64
+RISC-V C++ Emulator libriscv 5.6.0 rv64imafdc Linux
+threaded uname wall=0s
+RISC-V C++ Emulator libriscv 5.6.0 rv64imafdc Linux
+switch uname wall=0s
+Linux e2b.local 6.1.158+ #1 SMP PREEMPT_DYNAMIC Fri Jul 17 14:31:34 UTC 2026 x86_64 Linux
+native uname wall=0s
+tetherspike: patched auxv AT_BASE -> 0x40000
+loop completed: 2000000 iterations
+TETHERSPIKE_RESULT arch=riscv64 guest_mips=195.14 wall_s=222.361943 instrs=43392583881 status=0 fuel_exhausted=0
+threaded shloop N=2M wall=222s
+tetherspike: patched auxv AT_BASE -> 0x40000
+loop completed: 1000000 iterations
+TETHERSPIKE_RESULT arch=riscv64 guest_mips=173.90 wall_s=124.032808 instrs=21569722326 status=0 fuel_exhausted=0
+switch shloop N=1M wall=124s
+tetherspike: patched auxv AT_BASE -> 0x40000
+loop completed: 500000 iterations
+TETHERSPIKE_RESULT arch=riscv64 guest_mips=194.80 wall_s=54.876294 instrs=10689790936 status=0 fuel_exhausted=0
+bintr shloop N=500K wall=146s
+tetherspike: patched auxv AT_BASE -> 0x40000
+333332833333127552
+TETHERSPIKE_RESULT arch=riscv64 guest_mips=356.49 wall_s=19.095559 instrs=6807424112 status=0 fuel_exhausted=0
+threaded awkloop N=1M wall=19s
+tetherspike: patched auxv AT_BASE -> 0x40000
+333332833333127552
+TETHERSPIKE_RESULT arch=riscv64 guest_mips=326.20 wall_s=20.868677 instrs=6807424112 status=0 fuel_exhausted=0
+switch awkloop N=1M wall=21s
+333332833333127552
+native awkloop N=1M wall=1s
+tetherspike: patched auxv AT_BASE -> 0x40000
+85ec458c0c99633994eb1d95cc670984127fb89190bf47175ea0e55f4389b705  /bench/payload.bin
+TETHERSPIKE_RESULT arch=riscv64 guest_mips=746.95 wall_s=3.573926 instrs=2669561272 status=0 fuel_exhausted=0
+threaded sha256(32MiB) wall=3s
+tetherspike: patched auxv AT_BASE -> 0x40000
+85ec458c0c99633994eb1d95cc670984127fb89190bf47175ea0e55f4389b705  /bench/payload.bin
+TETHERSPIKE_RESULT arch=riscv64 guest_mips=555.45 wall_s=4.806087 instrs=2669561272 status=0 fuel_exhausted=0
+switch sha256(32MiB) wall=4818ms
+native sha256(32MiB) wall=183ms
+native shloop N=2M wall=4294ms
+native awkloop N=1M wall=1624ms

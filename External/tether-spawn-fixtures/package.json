@@ -1,0 +1,8 @@
+{
+  "name": "@tether/spawn-fixtures",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline replay fixtures for generic CLI subprocess spawning via @tether/shim IPC.",
+  "scripts": { "test": "node --test test/*.test.js" },
+  "engines": { "node": ">=18" }
+}

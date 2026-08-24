@@ -27,6 +27,8 @@ final class NodeRunningJob {
 protocol NodeRuntime: AnyObject {
     func run(job: NodeRunningJob, shouldInterrupt: @escaping () -> Bool) -> Int32
     func interrupt()
+    /// Cooperative cancel for interactive jobs (avoids pthread_kill on NodeMobile).
+    func requestCancel()
 }
 
 enum NodeRuntimeFactory {

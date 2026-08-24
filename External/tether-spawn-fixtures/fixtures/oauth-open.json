@@ -1,0 +1,7 @@
+{
+  "name": "oauth-open",
+  "description": "OAuth opener selected through BROWSER=open",
+  "env": { "DISPLAY": ":0", "BROWSER": "open", "WAYLAND_DISPLAY": "tether" },
+  "spawn": { "kind": "spawn", "file": "open", "args": ["https://claude.com/cai/oauth/authorize?client_id=fixture"], "cwd": "/work", "env": { "DISPLAY": ":0", "BROWSER": "open", "WAYLAND_DISPLAY": "tether" }, "interactive": false },
+  "expect": { "exit": 0 }
+}

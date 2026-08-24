@@ -1,0 +1,5 @@
+{
+  "name": "git-commit",
+  "spawn": { "kind": "spawn", "file": "git", "args": ["commit", "-m", "fixture commit"], "cwd": "/work", "env": { "WAYLAND_DISPLAY": "tether" }, "interactive": false },
+  "expect": { "exit": 0 }
+}

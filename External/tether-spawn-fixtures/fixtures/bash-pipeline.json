@@ -1,0 +1,5 @@
+{
+  "name": "bash-pipeline",
+  "spawn": { "kind": "spawn", "file": "bash", "args": ["-c", "npm test | tee test.log"], "cwd": "/work", "env": { "WAYLAND_DISPLAY": "tether" }, "interactive": false, "shell": true },
+  "expect": { "exit": 0 }
+}

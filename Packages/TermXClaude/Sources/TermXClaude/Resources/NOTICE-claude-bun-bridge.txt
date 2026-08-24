@@ -1,0 +1,14 @@
+TermX Claude Bun→Node bridge
+============================
+
+launcher.js and bun-shim.js are adapted from:
+
+  https://github.com/qnx/claude-code-qnx
+  Copyright 2026 QNX Software Systems
+  Licensed under the Apache License, Version 2.0
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Modifications by TermX: packaging for embedded NodeMobile, updated Bun
+standalone markers for Claude Code ≥2.1.241, TermX naming. Runtime also
+installs Node deps `ws` and `js-yaml` next to the launcher (required when
+running the extracted JS under Node instead of Bun — same as the QNX port).

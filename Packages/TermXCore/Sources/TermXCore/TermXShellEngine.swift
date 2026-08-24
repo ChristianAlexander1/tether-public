@@ -94,6 +94,16 @@ public final class TermXShellEngine: TerminalEngine {
             // signal — never on SIGINT (which cancels the current line) or SIGWINCH.
             while proc.isRunning && !proc.shouldTerminate {
                 guard ptySlave >= 0 else { break }
+
+                var pfd = pollfd(fd: ptySlave, events: Int16(POLLIN), revents: 0)
+                let ready = poll(&pfd, 1, 200)
+                if ready < 0 {
+                    if errno == EINTR { continue }
+                    break
+                }
+                if ready == 0 { continue }
+                if proc.shouldTerminate { break }
+
                 let bytesRead = read(ptySlave, &byteBuffer, byteBuffer.count)
                 if bytesRead < 0 && errno == EINTR { continue }
                 if bytesRead <= 0 { break }

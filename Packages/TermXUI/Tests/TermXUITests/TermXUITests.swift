@@ -44,6 +44,31 @@ final class TermXUITests: XCTestCase {
         session.send("echo hi\n")
         wait(for: [expectation], timeout: 3)
     }
+
+    func testTerminateReturnsWithoutBlockingMainThread() throws {
+        let engine = RecordingEngine()
+        let session = TerminalSession(cwd: "/tmp", engine: engine)
+        _ = try session.start()
+        let start = CFAbsoluteTimeGetCurrent()
+        session.terminate()
+        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        XCTAssertFalse(session.isRunning)
+        XCTAssertLessThan(elapsed, 0.15, "terminate() must not block the caller")
+        XCTAssertEqual(engine.signals.first?.1, SIGTERM)
+    }
+
+    func testStartFailureAfterPartialOpenDoesNotLeaveRunningSession() {
+        final class FailingEngine: TerminalEngine {
+            func startShell(cwd: String, env: [String: String], ptySlave: Int32, onExit: @escaping (Int32) -> Void) throws -> Int32 {
+                throw NSError(domain: "test", code: 1)
+            }
+            func signal(pid: Int32, _ sig: Int32) {}
+        }
+        let session = TerminalSession(cwd: "/tmp", engine: FailingEngine())
+        XCTAssertThrowsError(try session.start()) { _ in }
+        XCTAssertFalse(session.isRunning)
+        XCTAssertNil(session.pid)
+    }
 }
 
 #if canImport(Darwin)
@@ -115,6 +140,20 @@ final class TermXUIAcceptanceTests: XCTestCase {
         wait(for: [escExpectation, ctrlExpectation], timeout: 3)
     }
 
+    func testDoubleCtrlCInvokesHardInterruptOnSecondTap() throws {
+        let hookExpectation = expectation(description: "second-ctrl-c")
+        let engine = RecordingEngine()
+        let session = TerminalSession(cwd: "/tmp", engine: engine, onInput: { _ in })
+        session.onHardInterrupt = { force in
+            if force { hookExpectation.fulfill() }
+        }
+        _ = try session.start(ptySlave: 1)
+        session.send(TerminalKey.ctrlC)
+        session.send(TerminalKey.ctrlC)
+        wait(for: [hookExpectation], timeout: 3)
+        XCTAssertTrue(engine.signals.isEmpty)
+    }
+
     func testVimStyleFixtureSnapshot() {
         let fixture = """
         \u{1B}[?1049h\u{1B}[1;1H\u{1B}[2J\u{1B}[32mSTATUS\u{1B}[0m\u{1B}[10;6HHello vim\u{1B}[24;1H\u{1B}[7m-- INSERT --\u{1B}[0m
@@ -150,6 +189,19 @@ final class TermXUIAcceptanceTests: XCTestCase {
         let font = TerminalFont.jetBrainsMono.uiFont(size: 14)
         XCTAssertTrue(font.fontName.localizedCaseInsensitiveContains("JetBrains") || font.fontName.localizedCaseInsensitiveContains("jetbrains"))
         #endif
+    }
+
+    func testCopyableTranscriptIncludesMetadataAndStripsANSI() {
+        let session = TerminalSession(cwd: "/workspaces/demo", engine: RecordingEngine())
+        session.appendTranscriptForTesting(Data("\u{001B}[31merror: boom\u{001B}[0m\nok\n".utf8))
+        let text = session.copyableTranscript()
+        XCTAssertTrue(text.contains("Tether diagnostic log"))
+        XCTAssertTrue(text.contains("format: 3"))
+        XCTAssertTrue(text.contains("Browser / open debug"))
+        XCTAssertTrue(text.contains("cwd: /workspaces/demo"))
+        XCTAssertTrue(text.contains("error: boom"))
+        XCTAssertTrue(text.contains("ok"))
+        XCTAssertFalse(text.contains("\u{001B}["), "ANSI CSI should be stripped for chat paste")
     }
 }
 #endif

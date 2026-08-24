@@ -1,0 +1,6 @@
+true && echo "and-ran"
+false && echo "and-skipped"
+false || echo "or-ran"
+true || echo "or-skipped"
+true && false || echo "mixed"
+false || true && echo "chain-end"

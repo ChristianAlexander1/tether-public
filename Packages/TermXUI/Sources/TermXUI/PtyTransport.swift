@@ -42,8 +42,18 @@ public final class PtyPair {
     deinit { close() }
 }
 
-public enum PtyError: Error, Equatable {
+public enum PtyError: Error, Equatable, LocalizedError {
     case openFailed(Int32)
+    case unsupported
+
+    public var errorDescription: String? {
+        switch self {
+        case .openFailed(let code):
+            return "Could not open a terminal device (errno \(code))."
+        case .unsupported:
+            return "PTY sessions are not supported on this platform."
+        }
+    }
 }
 #else
 /// POSIX PTYs are supplied by Darwin on iOS. This declaration keeps the package

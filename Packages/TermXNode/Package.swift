@@ -9,6 +9,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../TermXCore"),
+        .package(path: "../TermXFiles"),
     ],
     targets: [
         .binaryTarget(
@@ -28,6 +29,7 @@ let package = Package(
             name: "TermXNode",
             dependencies: [
                 "TermXCore",
+                "TermXFiles",
                 .target(name: "NodeMobileBridge", condition: .when(platforms: [.iOS])),
             ],
             resources: [
@@ -37,7 +39,7 @@ let package = Package(
         ),
         .testTarget(
             name: "TermXNodeTests",
-            dependencies: ["TermXNode"]
+            dependencies: ["TermXNode", "TermXFiles"]
         ),
     ]
 )

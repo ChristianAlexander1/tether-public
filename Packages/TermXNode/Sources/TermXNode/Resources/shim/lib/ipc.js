@@ -1,238 +1,280 @@
 'use strict';
 
-/**
- * lib/ipc.js — the wire transport: request -> reply.
- *
- * Protocol (fixed, already spoken by the app):
- *   - one request  = one line of JSON terminated by '\n'
- *   - one reply    = one line of JSON terminated by '\n'
- *   - requests are synchronous: write exactly one request, read exactly one reply.
- *
- * All protocol handling lives behind roundTrip(requestObject) -> replyObject so
- * the transport can be swapped in tests (see setTransport / clearTransport).
- */
-
 const fs = require('fs');
 const net = require('net');
+const { EventEmitter } = require('events');
 
-// A shared, single-instance SharedArrayBuffer used purely as a sleep primitive
-// so we never block the thread with a busy loop when a non-blocking fd yields
-// EAGAIN between frames.
-const SLEEP = new Int32Array(new SharedArrayBuffer(4));
-function sleep(ms) {
-  Atomics.wait(SLEEP, 0, 0, ms > 0 ? ms : 0);
+function envInt(name) {
+  const v = process.env[name];
+  if (v == null || v === '') return null;
+  const n = Number.parseInt(v, 10);
+  return Number.isFinite(n) ? n : null;
 }
 
-/** True when the process is attached to a terminal. */
-function isInteractive() {
-  return process.env.TERMX_INTERACTIVE === '1';
+function ipcSockPath() {
+  return process.env.TETHER_IPC_SOCK || process.env.TERMX_IPC_SOCKET || null;
 }
 
-// ---------------------------------------------------------------------------
-// Swappable transport.
-// ---------------------------------------------------------------------------
-
-let injected = null;
-let envTransport = null;
-
-/** Override the transport (used by tests to inject an in-process fake). */
-function setTransport(fn) {
-  injected = fn;
-  resetEnvTransport();
+function ipcWriteFd() {
+  return envInt('TETHER_IPC_FD') ?? envInt('TERMX_IPC_FD');
 }
 
-/** Drop an injected transport so env-based resolution is used again. */
-function clearTransport() {
-  injected = null;
-  resetEnvTransport();
+function ipcReplyFd() {
+  return envInt('TETHER_IPC_REPLY_FD') ?? envInt('TERMX_IPC_REPLY_FD');
 }
 
-function resetEnvTransport() {
-  if (envTransport && typeof envTransport._reset === 'function') envTransport._reset();
-  envTransport = null;
+function realChildProcess() {
+  const Module = require('module');
+  const orig = Module._load;
+  if (typeof orig._tetherOriginalLoad === 'function') {
+    return orig._tetherOriginalLoad('child_process', module, false);
+  }
+  return require('node:child_process');
 }
 
-/**
- * Resolve the transport from (in order): an injected transport, then
- * TERMX_IPC_SOCKET, then TERMX_IPC_FD / TERMX_IPC_REPLY_FD. The env transport
- * is cached so a socket connection survives across roundTrips.
- */
-function resolveTransport() {
-  if (injected) return injected;
-  if (!envTransport) envTransport = buildEnvTransport();
-  return envTransport;
-}
-
-function buildEnvTransport() {
-  const socket = process.env.TERMX_IPC_SOCKET;
-  if (socket) return makeSocketTransport(socket);
-
-  const inFd = process.env.TERMX_IPC_FD;
-  const outFd = process.env.TERMX_IPC_REPLY_FD;
-  if (inFd !== undefined && inFd !== '' && outFd !== undefined && outFd !== '') {
-    return makeFdTransport(Number(inFd), Number(outFd));
+class IpcClient extends EventEmitter {
+  constructor() {
+    super();
+    this._pending = [];
+    this._buf = '';
+    this._connected = false;
+    this._writeStream = null;
+    this._readStream = null;
+    this._socket = null;
   }
 
-  throw new Error(
-    'TermX: no IPC transport configured (set TERMX_IPC_SOCKET or TERMX_IPC_FD/TERMX_IPC_REPLY_FD)'
+  connect() {
+    if (this._connected) return this;
+    const sock = ipcSockPath();
+    const writeFd = ipcWriteFd();
+    const replyFd = ipcReplyFd();
+
+    if (sock) {
+      this._connectSock(sock);
+    } else if (writeFd != null && replyFd != null) {
+      this._connectFds(writeFd, replyFd);
+    } else {
+      const err = new Error(
+        'Tether IPC not configured: set TETHER_IPC_SOCK / TERMX_IPC_SOCKET or IPC fd pair'
+      );
+      err.code = 'ENOIPC';
+      throw err;
+    }
+    return this;
+  }
+
+  _connectFds(writeFd, replyFd) {
+    this._writeStream = fs.createWriteStream(null, { fd: writeFd, autoClose: false });
+    this._readStream = fs.createReadStream(null, { fd: replyFd, autoClose: false });
+    this._readStream.setEncoding('utf8');
+    this._readStream.on('data', (chunk) => this._onData(chunk));
+    this._readStream.on('error', (e) => this.emit('error', e));
+    this._writeStream.on('error', (e) => this.emit('error', e));
+    this._connected = true;
+  }
+
+  _connectSock(sockPath) {
+    const sock = net.connect({ path: sockPath });
+    this._socket = sock;
+    sock.setEncoding('utf8');
+    sock.on('data', (chunk) => this._onData(chunk));
+    sock.on('error', (e) => this.emit('error', e));
+    sock.on('connect', () => {
+      if (typeof sock.unref === 'function') sock.unref();
+      this.emit('connect');
+    });
+    this._writeStream = sock;
+    this._readStream = sock;
+    this._connected = true;
+  }
+
+  _onData(chunk) {
+    this._buf += chunk;
+    let idx;
+    while ((idx = this._buf.indexOf('\n')) !== -1) {
+      const line = this._buf.slice(0, idx);
+      this._buf = this._buf.slice(idx + 1);
+      if (!line.trim()) continue;
+      let msg;
+      try {
+        msg = JSON.parse(line);
+      } catch (e) {
+        this.emit('error', e);
+        continue;
+      }
+      const waiter = this._pending.shift();
+      if (waiter) waiter.resolve(msg);
+      this.emit('message', msg);
+    }
+  }
+
+  send(obj) {
+    const line = JSON.stringify(obj) + '\n';
+    return new Promise((resolve, reject) => {
+      this._pending.push({ resolve, reject });
+      const ws = this._writeStream;
+      if (!ws) {
+        this._pending.pop();
+        return reject(new Error('IPC not connected'));
+      }
+      try {
+        ws.write(line);
+      } catch (e) {
+        this._pending.pop();
+        return reject(e);
+      }
+    });
+  }
+
+  close() {
+    if (this._socket) {
+      try {
+        this._socket.destroy();
+      } catch (_) {}
+    }
+    this._connected = false;
+  }
+}
+
+let _shared = null;
+
+function getClient() {
+  if (!_shared) {
+    _shared = new IpcClient();
+    _shared.connect();
+  }
+  return _shared;
+}
+
+function resetClient() {
+  if (_shared) {
+    _shared.close();
+    _shared = null;
+  }
+}
+
+function sendRequest(obj) {
+  return getClient().send(obj);
+}
+
+function sendRequestSync(obj, timeoutMs) {
+  const sockPath = ipcSockPath();
+  const writeFd = ipcWriteFd();
+  const replyFd = ipcReplyFd();
+  const timeout = timeoutMs == null ? 60000 : timeoutMs;
+
+  if (writeFd != null && replyFd != null) {
+    const line = JSON.stringify(obj) + '\n';
+    fs.writeSync(writeFd, line);
+    return readSyncLine(replyFd, timeout);
+  }
+
+  if (sockPath) {
+    return sendSyncViaHelper(sockPath, obj, timeout);
+  }
+
+  throw Object.assign(new Error('Tether IPC not configured'), { code: 'ENOIPC' });
+}
+
+function readSyncLine(fd, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let acc = '';
+  const buf = Buffer.alloc(4096);
+  while (Date.now() < deadline) {
+    let n = 0;
+    try {
+      n = fs.readSync(fd, buf, 0, buf.length, null);
+    } catch (e) {
+      if (e.code === 'EAGAIN' || e.code === 'EWOULDBLOCK') continue;
+      throw e;
+    }
+    if (n <= 0) continue;
+    acc += buf.slice(0, n).toString('utf8');
+    const idx = acc.indexOf('\n');
+    if (idx !== -1) return JSON.parse(acc.slice(0, idx));
+  }
+  const e = new Error('IPC sync timeout');
+  e.code = 'ETIMEDOUT';
+  throw e;
+}
+
+function sendSyncViaHelper(sockPath, obj, timeoutMs) {
+  const cp = realChildProcess();
+  const payload = JSON.stringify(obj);
+  const script = `
+    const net = require('net');
+    const path = process.argv[1];
+    const payload = process.argv[2];
+    const sock = net.connect({ path });
+    let buf = '';
+    sock.setEncoding('utf8');
+    sock.on('connect', () => sock.write(payload + '\\n'));
+    sock.on('data', (c) => {
+      buf += c;
+      const i = buf.indexOf('\\n');
+      if (i !== -1) {
+        process.stdout.write(buf.slice(0, i));
+        sock.end();
+        process.exit(0);
+      }
+    });
+    sock.on('error', (e) => {
+      process.stderr.write(e.message);
+      process.exit(2);
+    });
+    setTimeout(() => process.exit(3), ${Number(timeoutMs) || 60000});
+  `;
+  const r = cp.spawnSync(process.execPath, ['-e', script, sockPath, payload], {
+    encoding: 'utf8',
+    timeout: (timeoutMs || 60000) + 2000,
+  });
+  if (r.status !== 0) {
+    const err = new Error(r.stderr || 'IPC sync helper failed');
+    err.code = r.status === 3 ? 'ETIMEDOUT' : 'EIPC';
+    throw err;
+  }
+  return JSON.parse(r.stdout);
+}
+
+function isInteractive() {
+  return (
+    process.env.TETHER_INTERACTIVE === '1' ||
+    process.env.TERMX_INTERACTIVE === '1'
   );
 }
 
-/**
- * Connect the env transport. For a Unix socket this is the one asynchronous
- * step: establishing the connection (which requires the event loop to run) so
- * that every subsequent roundTrip can be purely synchronous. The app should
- * call this once during startup. For the fd transport / in-process fakes it is
- * a no-op and resolves immediately.
- */
-function connect() {
-  if (injected) return Promise.resolve();
-  const t = resolveTransport();
-  if (t && typeof t.connect === 'function') return t.connect();
+async function connect() {
+  getClient();
   return Promise.resolve();
 }
 
-// ---------------------------------------------------------------------------
-// Synchronous line reader over an fd (handles both blocking and non-blocking).
-// ---------------------------------------------------------------------------
-
-class SyncLineReader {
-  constructor(fd) {
-    this.fd = fd;
-    this.pending = '';
-    this.buf = Buffer.alloc(65536);
-  }
-
-  /** Returns the next '\n'-terminated line (without the '\n'), or null on EOF. */
-  readLine() {
-    for (;;) {
-      const nl = this.pending.indexOf('\n');
-      if (nl !== -1) {
-        const line = this.pending.slice(0, nl);
-        this.pending = this.pending.slice(nl + 1);
-        return line;
-      }
-      let n;
-      try {
-        n = fs.readSync(this.fd, this.buf, 0, this.buf.length, null);
-      } catch (err) {
-        if (err && err.code === 'EAGAIN') {
-          sleep(1);
-          continue;
-        }
-        if (err && err.code === 'EOF') return null;
-        throw err;
-      }
-      if (n === 0) return null; // EOF
-      this.pending += this.buf.toString('utf8', 0, n);
-    }
-  }
+function clearTransport() {
+  resetClient();
 }
-
-function writeLine(fd, obj) {
-  fs.writeSync(fd, JSON.stringify(obj) + '\n');
-}
-
-// ---------------------------------------------------------------------------
-// fd transport: write requests to TERMX_IPC_FD, read replies from the reply fd.
-// ---------------------------------------------------------------------------
-
-function makeFdTransport(inFd, outFd) {
-  const reader = new SyncLineReader(outFd);
-  function fdTransport(request) {
-    writeLine(inFd, request);
-    const line = reader.readLine();
-    if (line === null) throw new Error('TermX IPC: reply fd closed (EOF)');
-    return JSON.parse(line);
-  }
-  fdTransport.connect = () => Promise.resolve();
-  fdTransport.ready = () => true;
-  fdTransport._reset = () => {};
-  return fdTransport;
-}
-
-// ---------------------------------------------------------------------------
-// socket transport: connect to a Unix domain socket, then do synchronous
-// request/reply over the connected socket's fd.
-// ---------------------------------------------------------------------------
-
-function makeSocketTransport(socketPath) {
-  let chan = null;
-  let connectPromise = null;
-  let socket = null;
-
-  function connect() {
-    if (chan) return Promise.resolve();
-    if (connectPromise) return connectPromise;
-    connectPromise = new Promise((resolve, reject) => {
-      socket = new net.Socket();
-      socket.once('connect', () => {
-        const fd = socket._handle && socket._handle.fd;
-        if (!fd) {
-          socket.destroy();
-          reject(new Error('TermX IPC: could not obtain socket fd for ' + socketPath));
-          return;
-        }
-        chan = { fd, reader: new SyncLineReader(fd), socket };
-        if (typeof socket.unref === 'function') socket.unref();
-        resolve();
-      });
-      socket.once('error', (err) => {
-        reject(new Error('TermX IPC: connect failed for ' + socketPath + ': ' + err.message));
-      });
-      socket.connect(socketPath);
-    });
-    return connectPromise;
-  }
-
-  function socketTransport(request) {
-    if (!chan) {
-      // Request arrived before connect() resolved. Kick off a connection for a
-      // later call and tell the caller what to do (roundTrip is synchronous, so
-      // we cannot wait for the async connect here).
-      connect();
-      throw new Error(
-        'TermX IPC: socket ' + socketPath + ' not connected yet; await ipc.connect() before a synchronous request'
-      );
-    }
-    writeLine(chan.fd, request);
-    const line = chan.reader.readLine();
-    if (line === null) throw new Error('TermX IPC: reply socket closed (EOF)');
-    return JSON.parse(line);
-  }
-
-  socketTransport.connect = connect;
-  socketTransport.ready = () => !!chan;
-  socketTransport._reset = () => {
-    if (socket) socket.destroy();
-    chan = null;
-    connectPromise = null;
-    socket = null;
-  };
-  return socketTransport;
-}
-
-// ---------------------------------------------------------------------------
-// roundTrip: send one request, return exactly one parsed reply.
-// ---------------------------------------------------------------------------
 
 function roundTrip(request) {
-  const transport = resolveTransport();
-  const reply = transport(request);
+  const req = { ...request };
+  if (!req.kind && req.op) {
+    if (req.op === 'spawnSync' || req.op === 'spawn') req.kind = 'spawn';
+    else if (req.op === 'signal') req.kind = 'cancel';
+    else req.kind = req.op;
+    delete req.op;
+  }
+  const reply = sendRequestSync(req);
   if (!reply || typeof reply !== 'object') {
-    throw new Error('TermX IPC: invalid (non-object) reply');
+    throw new Error('Tether IPC: invalid reply');
   }
   return reply;
 }
 
 module.exports = {
-  roundTrip,
+  IpcClient,
+  getClient,
+  resetClient,
+  sendRequest,
+  sendRequestSync,
   connect,
-  setTransport,
   clearTransport,
-  resolveTransport,
-  makeFdTransport,
-  makeSocketTransport,
+  roundTrip,
   isInteractive,
-  _sleep: sleep,
 };

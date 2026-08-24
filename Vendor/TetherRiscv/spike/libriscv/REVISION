@@ -1,0 +1,4 @@
+libriscv vendored from https://github.com/libriscv/libriscv
+commit: 12055fb051bbdf3cfdec48b3386d06e38d038cf4
+date:   2026-08-23
+license: BSD-3-Clause (see LICENSE in this directory)

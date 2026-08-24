@@ -1,12 +1,19 @@
 import Foundation
+import TermXFiles
 
-/// Bridges @termx/shim JSON IPC to TermXCore spawn execution.
+/// Bridges @tether/shim JSON IPC to command execution.
 final class NodeSpawnBridge {
     private let executor: SpawnExecuting
-    private let queue = DispatchQueue(label: "com.termx.node.ipc")
+    private let openTarget: (SystemOpen.Target, SystemOpen.OpenOrigin) -> SystemOpen.Result
 
-    init(executor: SpawnExecuting) {
+    init(
+        executor: SpawnExecuting,
+        openTarget: @escaping (SystemOpen.Target, SystemOpen.OpenOrigin) -> SystemOpen.Result = {
+            SystemOpen.open($0, origin: $1)
+        }
+    ) {
         self.executor = executor
+        self.openTarget = openTarget
     }
 
     func handle(requestData: Data, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
@@ -14,13 +21,42 @@ final class NodeSpawnBridge {
         guard let line = String(data: requestData, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !line.isEmpty,
-              let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-              let op = json["op"] as? String else {
-            return Self.replyJSON(["error": "invalid request"])
+              let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
+            return Self.replyJSON(["error": "invalid request", "ok": false])
         }
 
-        switch op {
+        let kind = (json["kind"] as? String) ?? (json["op"] as? String)
+        guard let kind else {
+            return Self.replyJSON(["error": "missing kind/op", "ok": false])
+        }
+
+        switch kind {
+        case "cancel", "signal":
+            let pid = json["pid"] as? Int32 ?? -1
+            if kind == "signal" {
+                let sigName = json["signal"] as? String ?? "SIGINT"
+                executor.signal(pid: pid, signal: Self.signalNumber(sigName))
+            } else {
+                executor.signal(pid: pid, signal: Int32(SIGINT))
+            }
+            return Self.replyJSON(["ok": true, "exitCode": 130, "stdout": "", "stderr": "", "pid": pid])
+
         case "spawn", "spawnSync":
+            return handleSpawn(
+                json, stdinFD: stdinFD, stdoutFD: stdoutFD, stderrFD: stderrFD,
+                defaultCWD: defaultCWD, defaultEnv: defaultEnv, interactive: interactive
+            )
+
+        default:
+            return Self.replyJSON(["error": "unknown kind \(kind)", "ok": false])
+        }
+    }
+
+    private func handleSpawn(
+        _ json: [String: Any],
+        stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
+        defaultCWD: String, defaultEnv: [String: String], interactive: Bool
+    ) -> Data {
             let file = json["file"] as? String ?? ""
             let args = json["args"] as? [String] ?? []
             let cwd = json["cwd"] as? String ?? defaultCWD
@@ -29,6 +65,51 @@ final class NodeSpawnBridge {
                 env.merge(override) { _, new in new }
             }
             let isInteractive = (json["interactive"] as? Bool) ?? interactive
+
+            SystemOpen.log("node spawn \(file) \(args.prefix(2).joined(separator: " "))")
+
+            // Desktop programs commonly probe an opener with `which` before using it.
+            let whichBase = (file as NSString).lastPathComponent
+            if whichBase == "which", args.count == 1, SystemOpen.openerCommands.contains(args[0]) {
+                let path = "/usr/bin/\(args[0])"
+                SystemOpen.log("which \(args[0]) -> \(path) (virtual platform opener)")
+                return Self.replyJSON([
+                    "ok": true,
+                    "pid": Int32.random(in: 9000..<99999),
+                    "exitCode": 0,
+                    "stdout": path + "\n",
+                    "stderr": "",
+                    "signal": NSNull(),
+                ])
+            }
+
+            // Desktop CLIs call open/xdg-open; provide the platform opener for any package.
+            if let target = SystemOpen.resolve(command: file, arguments: args) {
+                SystemOpen.log("spawn intercept \(file) \(args.prefix(1))")
+                let result = openTarget(target, .hostRuntime)
+                if result == .opened {
+                    return Self.replyJSON([
+                        "ok": true,
+                        "pid": Int32.random(in: 9000..<99999),
+                        "exitCode": 0,
+                        "stdout": "",
+                        "stderr": "",
+                        "signal": NSNull(),
+                    ])
+                }
+                if case .failed(let why) = result {
+                    SystemOpen.log("open failed: \(why)")
+                    return Self.replyJSON([
+                        "ok": false,
+                        "pid": Int32.random(in: 9000..<99999),
+                        "exitCode": 1,
+                        "stdout": "",
+                        "stderr": "\(file): \(why)\n",
+                        "signal": NSNull(),
+                    ])
+                }
+            }
+
             if !file.isEmpty, !FileManager.default.isExecutableFile(atPath: file),
                !file.hasPrefix("/") {
                 let pathEnv = env["PATH"] ?? defaultEnv["PATH"] ?? "/bin"
@@ -37,6 +118,7 @@ final class NodeSpawnBridge {
                 }
                 if resolved == nil, file != "sh", file != "/bin/sh" {
                     return Self.replyJSON([
+                        "ok": false,
                         "pid": Int32.random(in: 9000..<99999),
                         "exitCode": NSNull(),
                         "stdout": "",
@@ -64,16 +146,11 @@ final class NodeSpawnBridge {
                 reply["exitCode"] = NSNull()
                 reply["error"] = "spawn \(file) ENOENT"
                 reply["code"] = "ENOENT"
+                reply["ok"] = false
+            } else {
+                reply["ok"] = true
             }
             return Self.replyJSON(reply)
-        case "signal":
-            let pid = json["pid"] as? Int32 ?? -1
-            let sigName = json["signal"] as? String ?? "SIGINT"
-            executor.signal(pid: pid, signal: Self.signalNumber(sigName))
-            return Self.replyJSON(["ok": true])
-        default:
-            return Self.replyJSON(["error": "unknown op \(op)"])
-        }
     }
 
     private static func replyJSON(_ obj: [String: Any]) -> Data {

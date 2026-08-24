@@ -6,7 +6,7 @@ import XCTest
 final class ScreensTests: XCTestCase {
     private func openMenuItem(_ name: String) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchEnvironment["TERMX_AUTOWORKSPACE"] = "1"
+        app.launchEnvironment["TETHER_AUTOWORKSPACE"] = "1"
         app.launch()
         sleep(5)
         app.buttons["workspaceMenu"].firstMatch.tap()

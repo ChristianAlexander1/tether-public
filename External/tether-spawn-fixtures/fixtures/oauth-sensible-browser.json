@@ -1,0 +1,7 @@
+{
+  "name": "oauth-sensible-browser",
+  "description": "OAuth fallback through sensible-browser",
+  "env": { "DISPLAY": ":0" },
+  "spawn": { "kind": "spawn", "file": "sensible-browser", "args": ["https://claude.com/cai/oauth/authorize?client_id=fixture"], "cwd": "/work", "env": { "DISPLAY": ":0" }, "interactive": false },
+  "expect": { "exit": 0 }
+}

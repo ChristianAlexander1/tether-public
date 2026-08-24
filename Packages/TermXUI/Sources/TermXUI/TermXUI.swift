@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import TermXFiles
 #if canImport(Darwin)
 import Darwin
 #endif
@@ -85,6 +86,12 @@ public final class TerminalSession: ObservableObject, Identifiable {
     private let outputQueue = DispatchQueue(label: "com.termx.session.output", qos: .userInitiated)
     private var onInput: ((Data) -> Void)?
     private var onOutput: ((Data) -> Void)?
+    /// Second ^C within `ctrlCRepeatWindow` invokes this with `forceNodeSignal: true`
+    /// so embedded Node/Claude can exit (first ^C is PTY-only for Ink "press again").
+    public var onHardInterrupt: ((_ forceNodeSignal: Bool) -> Void)?
+    private var lastCtrlCAt: Date?
+    private let ctrlCLock = NSLock()
+    private static let ctrlCRepeatWindow: TimeInterval = 2.5
     private let readerLock = NSLock()
     private var readerShouldStop = false
     private var readerFinished: DispatchSemaphore?
@@ -134,8 +141,27 @@ public final class TerminalSession: ObservableObject, Identifiable {
         return startedPID
     }
 
-    public func send(_ data: Data) { outputQueue.async { [weak self] in self?.onInput?(data) } }
+    public func send(_ data: Data) {
+        outputQueue.async { [weak self] in
+            guard let self else { return }
+            if Self.isHardInterrupt(data) {
+                let now = Date()
+                self.ctrlCLock.lock()
+                let isSecond = self.lastCtrlCAt.map { now.timeIntervalSince($0) <= Self.ctrlCRepeatWindow } ?? false
+                self.lastCtrlCAt = now
+                self.ctrlCLock.unlock()
+                if isSecond {
+                    self.onHardInterrupt?(true)
+                }
+            }
+            self.onInput?(data)
+        }
+    }
     public func send(_ text: String) { send(Data(text.utf8)) }
+
+    private static func isHardInterrupt(_ data: Data) -> Bool {
+        data == TerminalKey.ctrlC
+    }
 
     public func resize(cols: Int, rows: Int) {
         self.cols = max(1, cols)
@@ -148,23 +174,87 @@ public final class TerminalSession: ObservableObject, Identifiable {
     public func terminate() {
         if let pid { engine.signal(pid: pid, SIGTERM) }
         isRunning = false
+        pid = nil
         shutdownPTY()
     }
 
-    /// Stops the reader thread before closing the descriptors. Closing a pty master
-    /// while a thread is blocked in read() wedges the caller, so the reader is asked to
-    /// finish first and only then are the fds released.
+    // MARK: - Test transcript (temporary — remove after debugging)
+
+    /// Rolling capture of everything written to the PTY (banner, typed echo, stdout/stderr,
+    /// errors). Used by the temporary “Copy log” button so a session can be pasted into chat.
+    private var transcript = Data()
+    private static let transcriptCap = 2 * 1024 * 1024
+
+    private func appendTranscript(_ data: Data) {
+        guard !data.isEmpty else { return }
+        transcript.append(data)
+        if transcript.count > Self.transcriptCap {
+            transcript.removeFirst(transcript.count - Self.transcriptCap)
+        }
+    }
+
+    /// Snapshot for clipboard: full diagnostic bundle + ANSI-stripped terminal text.
+    public func copyableTranscript() -> String {
+        var sessionMeta = """
+        cwd: \(cwd)
+        cols×rows: \(cols)×\(rows)
+        running: \(isRunning)
+        """
+        if let pid { sessionMeta += "\npid: \(pid)" }
+
+        let body: String = outputQueue.sync {
+            String(data: transcript, encoding: .utf8)
+                ?? String(decoding: transcript, as: UTF8.self)
+        }
+        let plain = Self.stripANSI(body)
+        return CopyLogDiagnostics.shared.diagnosticHeader(sessionLines: sessionMeta + "\n---\n" + plain)
+    }
+
+    /// Test-only: inject bytes as if the PTY produced them.
+    public func appendTranscriptForTesting(_ data: Data) {
+        outputQueue.sync { appendTranscript(data) }
+    }
+
+    private static func stripANSI(_ text: String) -> String {
+        // CSI / OSC / simple ESC sequences — keep plain text for pasting into chat.
+        let patterns = [
+            "\u{001B}\\[[0-9;?]*[ -/]*[@-~]",
+            "\u{001B}\\][^\u{0007}]*(\u{0007}|\u{001B}\\\\)",
+            "\u{001B}[()][0-9A-Za-z]",
+            "\u{001B}.",
+        ]
+        var result = text
+        for pattern in patterns {
+            if let re = try? NSRegularExpression(pattern: pattern, options: []) {
+                result = re.stringByReplacingMatches(
+                    in: result, options: [],
+                    range: NSRange(result.startIndex..., in: result),
+                    withTemplate: ""
+                )
+            }
+        }
+        return result
+    }
+
+    /// Stops the reader thread before closing the descriptors. Never blocks the caller
+    /// (Close workspace runs on the main thread); the reader exits within one poll window.
     private func shutdownPTY() {
         readerLock.lock()
         readerShouldStop = true
         let semaphore = readerFinished
-        readerLock.unlock()
-        if let semaphore {
-            _ = semaphore.wait(timeout: .now() + 1.0)
-            readerLock.lock(); readerFinished = nil; readerLock.unlock()
-        }
-        pty?.close()
+        let pair = pty
         pty = nil
+        readerLock.unlock()
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            if let semaphore {
+                _ = semaphore.wait(timeout: .now() + 0.5)
+            }
+            pair?.close()
+            self?.readerLock.lock()
+            self?.readerFinished = nil
+            self?.readerLock.unlock()
+        }
     }
 
     public func attachOutputHandler(_ handler: @escaping (Data) -> Void) {
@@ -185,6 +275,8 @@ public final class TerminalSession: ObservableObject, Identifiable {
     private static let pendingOutputCap = 512 * 1024
 
     private func deliverOutput(_ data: Data) {
+        appendTranscript(data)
+        Self.mirrorPtyLog(data)
         if let onOutput {
             onOutput(data)
         } else {
@@ -193,6 +285,25 @@ public final class TerminalSession: ObservableObject, Identifiable {
                 pendingOutput.removeFirst(pendingOutput.count - Self.pendingOutputCap)
             }
         }
+    }
+
+    /// DEBUG/test: TETHER_PTY_LOG=1 mirrors PTY bytes to Documents/.tether-pty.log
+    /// so Simulator harnesses can inspect interactive Claude login without redirects.
+    private static func mirrorPtyLog(_ data: Data) {
+        #if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        guard (environment["TETHER_PTY_LOG"] ?? environment["TERMX_PTY_LOG"]) == "1",
+              !data.isEmpty else { return }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = docs.appendingPathComponent(".tether-pty.log")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: data)
+        #endif
     }
 
     /// Pastes UTF-8 text into the PTY as if the user pasted from the clipboard.

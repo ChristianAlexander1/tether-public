@@ -1,0 +1,7 @@
+top#=2
+top[a b]
+top[c]
+fn#=2 fn1=p
+fn[p]
+fn[q]
+back:a b

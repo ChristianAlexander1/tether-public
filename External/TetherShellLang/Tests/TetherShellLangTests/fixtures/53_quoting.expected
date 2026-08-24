@@ -1,0 +1,7 @@
+double  spaces
+single  spaces
+mixedquotedsingle
+var:a b
+esc "quote" $dollar
+not $x
+plain space

@@ -1,0 +1,6 @@
+count=4
+first=a second=b
+all=a b c d
+after-shift:b c (3)
+last:d (1)
+reset:xy (2)

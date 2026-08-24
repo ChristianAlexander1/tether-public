@@ -8,10 +8,19 @@ let package = Package(
         .library(name: "TermXUI", targets: ["TermXUI"])
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0")
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
+        .package(path: "../TermXFiles"),
     ],
     targets: [
-        .target(name: "TermXUI", dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")], path: "Sources/TermXUI", resources: [.process("Resources")]),
+        .target(
+            name: "TermXUI",
+            dependencies: [
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
+                .product(name: "TermXFiles", package: "TermXFiles"),
+            ],
+            path: "Sources/TermXUI",
+            resources: [.process("Resources")]
+        ),
         .testTarget(name: "TermXUITests", dependencies: ["TermXUI", .product(name: "SwiftTerm", package: "SwiftTerm")], path: "Tests/TermXUITests")
     ]
 )

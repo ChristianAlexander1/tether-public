@@ -12,7 +12,8 @@ let package = Package(
         .package(path: "Packages/TermXPython"),
         .package(path: "Packages/TermXNode"),
         .package(path: "Packages/TermXClaude"),
-        .package(path: "Packages/TermXLinux")
+        .package(path: "Packages/TermXLinux"),
+        .package(path: "External/TetherWasm")
     ],
     targets: [
         .target(name: "TermXIntegration", dependencies: [
@@ -22,7 +23,8 @@ let package = Package(
             .product(name: "TermXPython", package: "TermXPython"),
             .product(name: "TermXNode", package: "TermXNode"),
             .product(name: "TermXClaude", package: "TermXClaude"),
-            .product(name: "TermXLinux", package: "TermXLinux")
+            .product(name: "TermXLinux", package: "TermXLinux"),
+            .product(name: "TetherWasm", package: "TetherWasm")
         ], path: "App/IntegrationSource"),
         .testTarget(name: "TermXIntegrationTests", dependencies: ["TermXIntegration"], path: "App/IntegrationTests")
     ]

@@ -1,0 +1,4 @@
+module CWasm3 {
+    header "wasm3.h"
+    export *
+}

@@ -10,7 +10,7 @@ final class NodeSocketServer {
 
     init?(directory: String) {
         _ = directory
-        socketPath = "/tmp/termx-\(UUID().uuidString.prefix(8)).sock"
+        socketPath = "/tmp/tether-\(UUID().uuidString.prefix(8)).sock"
         serverFD = socket(AF_UNIX, SOCK_STREAM, 0)
         guard serverFD >= 0 else { return nil }
 
@@ -48,9 +48,23 @@ final class NodeSocketServer {
                 var len: socklen_t = socklen_t(MemoryLayout<sockaddr>.size)
                 let client = accept(self.serverFD, &clientAddr, &len)
                 if client < 0 { continue }
-                self.handleClient(client, bridge: bridge, stdinFD: stdinFD, stdoutFD: stdoutFD,
-                                  stderrFD: stderrFD, cwd: cwd, env: env, interactive: interactive)
-                close(client)
+                // A preload keeps one asynchronous IPC socket open for the life of
+                // Node, while spawnSync uses a short-lived helper connection. Serving
+                // clients inline would let the persistent connection monopolize the
+                // accept loop and deadlock every synchronous child-process request.
+                let clientThread = Thread { [weak self] in
+                    guard let self else {
+                        close(client)
+                        return
+                    }
+                    self.handleClient(
+                        client, bridge: bridge, stdinFD: stdinFD, stdoutFD: stdoutFD,
+                        stderrFD: stderrFD, cwd: cwd, env: env, interactive: interactive
+                    )
+                    close(client)
+                }
+                clientThread.name = "com.tether.node.ipc-client"
+                clientThread.start()
             }
         }
         acceptThread?.start()
@@ -89,8 +103,23 @@ final class NodeSocketServer {
                     requestData: line, stdinFD: stdinFD, stdoutFD: stdoutFD, stderrFD: stderrFD,
                     defaultCWD: cwd, defaultEnv: env, interactive: interactive
                 )
-                _ = response.withUnsafeBytes { ptr in
-                    write(client, ptr.baseAddress!, response.count)
+                Self.writeAll(response, to: client)
+            }
+        }
+    }
+
+    private static func writeAll(_ data: Data, to fd: Int32) {
+        data.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            var written = 0
+            while written < raw.count {
+                let count = write(fd, base.advanced(by: written), raw.count - written)
+                if count > 0 {
+                    written += count
+                } else if count < 0, errno == EINTR {
+                    continue
+                } else {
+                    break
                 }
             }
         }

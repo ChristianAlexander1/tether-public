@@ -1,0 +1,5 @@
+to-stdout
+status=1
+tethersh: .: cannot open ./missing-lib.sh
+[stderr]
+to-stderr

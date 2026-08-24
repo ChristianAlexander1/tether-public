@@ -1,0 +1,7 @@
+# Blink's default log filename
+blink.log
+# Network test may drop these
+*.apk
+# Editor/OS cruft
+.DS_Store
+*.swp

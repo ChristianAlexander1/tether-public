@@ -1,0 +1,57 @@
+diff --git a/lib/libriscv/linux/system_calls.cpp b/lib/libriscv/linux/system_calls.cpp
+index 0612b98..9637f61 100644
+--- a/lib/libriscv/linux/system_calls.cpp
++++ b/lib/libriscv/linux/system_calls.cpp
+@@ -594,11 +594,15 @@ static void syscall_openat(Machine<W>& machine)
+ 				SYSPRINT("SYSCALL openat(path: %s) => %d\n",
+ 					path.c_str(), machine.template return_value<int>());
+ 				return;
+ 			}
+ 		}
+-		int real_fd = openat(machine.fds().translate(dir_fd), path.c_str(), flags, mode);
++		// [Tether P8 patch] AT_FDCWD must be forwarded verbatim; translating
++		// it through vfd lookup yields -1 (EBADF) for every relative/abs open.
++		const int host_dirfd = (dir_fd == AT_FDCWD) ? AT_FDCWD
++			: machine.fds().translate(dir_fd);
++		int real_fd = openat(host_dirfd, path.c_str(), flags, mode);
+ 		if (real_fd >= 0) {
+ 			const int vfd = machine.fds().assign_file(real_fd);
+ 			machine.set_result(vfd);
+ 		} else {
+ 			// Translate errno() into kernel API return value
+diff --git a/lib/libriscv/machine.cpp b/lib/libriscv/machine.cpp
+index c7d53f1..c6170e0 100644
+--- a/lib/libriscv/machine.cpp
++++ b/lib/libriscv/machine.cpp
+@@ -201,10 +201,31 @@ namespace riscv
+ 			if (binary_phdr[i].p_type == Elf<W>::PT_PHDR) {
+ 				phdr_location = this->memory.elf_base_address(binary_phdr[i].p_vaddr);
+ 				break;
+ 			}
+ 		}
++		if (phdr_location == 0) {
++			// [Tether P8 patch] Kernel-faithful AT_PHDR: Linux points AT_PHDR
++			// into the loaded image when the program header table is covered
++			// by a PT_LOAD segment (fs/binfmt_elf.c). The stack-copy fallback
++			// below breaks musl's ld.so: it compares AT_PHDR against its own
++			// in-image phdrs to detect "loader invoked directly", and on
++			// mismatch assumes a kernel-mapped app exists with bogus base 0,
++			// then crashes zeroing that "app's" RW gaps at raw vaddrs.
++			for (int i = 0; i < phdr_count; i++)
++			{
++				const auto* ph = &binary_phdr[i];
++				const address_t phoff = binary_ehdr->e_phoff;
++				const address_t phsz  = phdr_count * sizeof(*ph);
++				if (ph->p_type == Elf<W>::PT_LOAD &&
++				    phoff >= ph->p_offset && phoff + phsz <= ph->p_offset + ph->p_filesz) {
++					phdr_location = this->memory.elf_base_address(ph->p_vaddr)
++						+ (phoff - ph->p_offset);
++					break;
++				}
++			}
++		}
+ 		if (phdr_location == 0) {
+ 			for (int i = phdr_count-1; i >= 0; i--)
+ 			{
+ 				const auto* phd = &binary_phdr[i];
+ 				push_down(*this, dst, phd, sizeof(typename Elf<W>::ProgramHeader));

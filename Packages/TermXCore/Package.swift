@@ -6,12 +6,13 @@ let package = Package(
     products: [.library(name: "TermXCore", targets: ["TermXCore"])],
     dependencies: [
         .package(path: "../../External/TermXCommands"),
+        .package(path: "../../External/TetherCommands"),
         .package(path: "../../External/TermXShellLang"),
     ],
     targets: [
         .target(
             name: "TermXCore",
-            dependencies: ["TermXCommands", "TermXShellLang"],
+            dependencies: ["TermXCommands", "TetherCommands", "TermXShellLang"],
             resources: [.process("Resources/registry.json")],
             publicHeadersPath: "include"
         ),

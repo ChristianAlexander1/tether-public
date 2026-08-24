@@ -1,0 +1,4 @@
+found:a.txt
+found:b.txt
+quoted *.md
+no-match: *.zzz

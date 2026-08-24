@@ -7,9 +7,13 @@ let package = Package(
     products: [
         .library(name: "TermXClaude", targets: ["TermXClaude"]),
     ],
+    dependencies: [
+        .package(path: "../TermXCore"),
+    ],
     targets: [
         .target(
             name: "TermXClaude",
+            dependencies: ["TermXCore"],
             resources: [.process("Resources")]
         ),
         .testTarget(

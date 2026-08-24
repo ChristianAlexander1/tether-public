@@ -58,12 +58,10 @@ Review-day tactics (learned from iSH/a-Shell history):
   full of precedents).
 - Review notes: explain the interpreter architecture up front, cite that all native code
   is in-bundle, list the precedent apps. Provide a demo login + a 2-min video.
-- First submission: consider Linux-lane OFF by default/flagged for a fast first approval,
-  enable in 1.0.1 (both iSH and a-Shell ultimately kept their features; this just
-  de-risks v1 timing).
+- Submit with the **full product** enabled: Python, Node, Claude Code launcher, and Alpine
+  Linux guest — same surface area iSH and a-Shell ship successfully.
 - If rejected: respond in Resolution Center citing 2.5.2's interpreted-code clause +
-  precedents; appeal to the App Review Board if needed. This path is well trodden and
-  it works.
+  precedents; appeal to the App Review Board if needed.
 
 ## Other legal checklist
 
@@ -77,8 +75,8 @@ Review-day tactics (learned from iSH/a-Shell history):
 - Our own license: app is closed-source & commercial (allowed by every green license
   above). Optionally open-source non-core packages later for community goodwill.
 
-## Monetization note (decide later, affects nothing above)
+## Monetization (optional — does not gate features)
 
-Freemium is the proven shape: free terminal + Python; one-time "Pro" unlock (Node +
-Claude Code launcher + Linux lane + iPad multi-window). All green licenses permit paid
-distribution.
+All runtime lanes can ship in the base app; green licenses permit paid or free distribution.
+If monetizing later, prefer additive Pro features (iPad multi-window, cloud sync) rather than
+disabling core lanes users need for Claude Code.

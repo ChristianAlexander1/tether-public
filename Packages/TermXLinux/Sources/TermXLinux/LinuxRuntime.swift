@@ -114,6 +114,7 @@ final class HostBlinkRuntime: LinuxRuntime {
     private let rootfs: URL
     private let mapper: LinuxPathMapper
     private var process: Process?
+    private let processLock = NSLock()
 
     init(rootfs: URL, mapper: LinuxPathMapper) {
         self.rootfs = rootfs
@@ -153,51 +154,112 @@ final class HostBlinkRuntime: LinuxRuntime {
                 blink.standardOutput = outPipe
                 blink.standardError = errPipe
 
+                self.processLock.lock()
                 self.process = blink
+                self.processLock.unlock()
                 do {
                     try blink.run()
+
+                    // Drain while Blink is running. Package installs and compilers can
+                    // easily exceed a pipe's capacity; waiting until exit deadlocks the
+                    // guest once stdout/stderr fills the kernel buffer.
+                    let drainGroup = DispatchGroup()
+                    drainGroup.enter()
+                    DispatchQueue.global(qos: .utility).async {
+                        defer { drainGroup.leave() }
+                        Self.forward(outPipe.fileHandleForReading, to: stdoutFD)
+                    }
+                    drainGroup.enter()
+                    DispatchQueue.global(qos: .utility).async {
+                        defer { drainGroup.leave() }
+                        Self.forward(errPipe.fileHandleForReading, to: stderrFD)
+                    }
+
+                    var cancellationStartedAt: Date?
+                    var sentTerminate = false
+                    var sentKill = false
                     while blink.isRunning {
                         if shouldInterrupt() {
-                            blink.interrupt()
-                            break
+                            if cancellationStartedAt == nil {
+                                cancellationStartedAt = Date()
+                                blink.interrupt()
+                            } else if let started = cancellationStartedAt {
+                                let elapsed = Date().timeIntervalSince(started)
+                                if elapsed >= 2, !sentKill {
+                                    sentKill = true
+                                    _ = kill(blink.processIdentifier, SIGKILL)
+                                } else if elapsed >= 1, !sentTerminate {
+                                    sentTerminate = true
+                                    blink.terminate()
+                                }
+                            }
                         }
                         Thread.sleep(forTimeInterval: 0.05)
                     }
-                    let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-                    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-                    if stdoutFD >= 0, !outData.isEmpty {
-                        outData.withUnsafeBytes { ptr in
-                            write(stdoutFD, ptr.baseAddress!, outData.count)
-                        }
-                    }
-                    if stderrFD >= 0, !errData.isEmpty {
-                        errData.withUnsafeBytes { ptr in
-                            write(stderrFD, ptr.baseAddress!, errData.count)
-                        }
-                    }
+                    blink.waitUntilExit()
+                    drainGroup.wait()
                     continuation.resume(returning: Int32(blink.terminationStatus))
                 } catch {
                     continuation.resume(returning: 127)
                 }
+                self.processLock.lock()
                 self.process = nil
+                self.processLock.unlock()
             }
         }
     }
 
     func interrupt() {
-        process?.interrupt()
+        processLock.lock()
+        let runningProcess = process
+        processLock.unlock()
+        runningProcess?.interrupt()
+    }
+
+    private static func forward(_ source: FileHandle, to targetFD: Int32) {
+        while true {
+            let data = source.availableData
+            if data.isEmpty { return }
+            guard targetFD >= 0 else { continue }
+            data.withUnsafeBytes { raw in
+                guard let base = raw.baseAddress else { return }
+                var written = 0
+                while written < raw.count {
+                    let count = write(targetFD, base.advanced(by: written), raw.count - written)
+                    if count > 0 {
+                        written += count
+                    } else if count < 0, errno == EINTR {
+                        continue
+                    } else {
+                        return
+                    }
+                }
+            }
+        }
     }
 }
 #endif
 
 enum LinuxEnvironment {
     static func guestEnviron(cwd: String, interactive: Bool) -> [String: String] {
-        var env: [String: String] = [
+        // Prefer /work when that is the Docker-style project mount.
+        let pwd = (cwd == "/work" || cwd.hasPrefix("/work/")) ? cwd
+            : (cwd.hasPrefix("/") ? cwd : "/work")
+        let env: [String: String] = [
             "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "HOME": "/root",
+            "USER": "root",
+            "LOGNAME": "root",
+            "SHELL": "/bin/sh",
+            "TMPDIR": "/tmp",
+            "HOSTNAME": "tether",
             "TERM": interactive ? "xterm-256color" : "dumb",
-            "LANG": "en_US.UTF-8",
-            "PWD": cwd.hasPrefix("/") ? cwd : "/",
+            "LANG": "C.UTF-8",
+            "PWD": pwd,
+            // Generic desktop-integration contract used by any guest program.
+            "DISPLAY": ":0",
+            "WAYLAND_DISPLAY": "tether",
+            "BROWSER": "open",
         ]
         return env
     }

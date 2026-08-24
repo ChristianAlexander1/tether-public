@@ -8,8 +8,11 @@ final class C6AcceptanceTests: XCTestCase {
     private var service: BlinkLinuxService!
 
     override func setUpWithError() throws {
+        guard ProcessInfo.processInfo.environment["TETHER_LINUX_NETWORK_TESTS"] == "1" else {
+            throw XCTSkip("set TETHER_LINUX_NETWORK_TESTS=1 to run real Blink/Alpine acceptance tests")
+        }
         scratch = FileManager.default.temporaryDirectory
-            .appendingPathComponent("termx-c6-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tether-c6-\(UUID().uuidString)", isDirectory: true)
         let rootfs = scratch.appendingPathComponent("rootfs", isDirectory: true)
         let workspaces = scratch.appendingPathComponent("workspaces", isDirectory: true)
         try FileManager.default.createDirectory(at: workspaces, withIntermediateDirectories: true)
@@ -17,7 +20,9 @@ final class C6AcceptanceTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        try? FileManager.default.removeItem(at: scratch)
+        if let scratch {
+            try? FileManager.default.removeItem(at: scratch)
+        }
     }
 
     private func runGuest(_ cmdline: String, timeout: TimeInterval = 120) async throws -> (code: Int32, out: String, err: String) {
@@ -118,7 +123,9 @@ final class C6AcceptanceTests: XCTestCase {
 
     func testC6WorkspacesMapping() async throws {
         try await service.bootstrap()
-        throw XCTSkip("/workspaces VfsMount requires TERMX_BLINK_EMBED=1 with linked blink.a; host subprocess path does not bind mounts")
+        guard ProcessInfo.processInfo.environment["TERMX_BLINK_EMBED"] == "1" else {
+            throw XCTSkip("/workspaces VfsMount requires TERMX_BLINK_EMBED=1 with linked blink.a; host subprocess path does not bind mounts")
+        }
 
         let demo = scratch.appendingPathComponent("workspaces/demo", isDirectory: true)
         try FileManager.default.createDirectory(at: demo, withIntermediateDirectories: true)
@@ -135,6 +142,11 @@ final class C6AcceptanceTests: XCTestCase {
     func testC6BunHelloWorld() async throws {
         try await service.bootstrap()
 
+        // A standalone release archive is not an apk package, so install its
+        // declared runtime libraries before copying it into the guest.
+        let dependencies = try await runGuest("/sbin/apk add --no-cache libstdc++ libgcc", timeout: 180)
+        XCTAssertEqual(dependencies.code, 0, dependencies.out + dependencies.err)
+
         let bunURL = URL(string: "https://github.com/oven-sh/bun/releases/download/bun-v1.2.0/bun-linux-x64-musl-baseline.zip")!
         let (zip, _) = try await URLSession.shared.download(from: bunURL)
         let extract = scratch.appendingPathComponent("bunzip")
@@ -145,7 +157,7 @@ final class C6AcceptanceTests: XCTestCase {
         try proc.run()
         proc.waitUntilExit()
 
-        let bunBin = try (FileManager.default.subpaths(atPath: extract.path) ?? [])
+        let bunBin = (FileManager.default.subpaths(atPath: extract.path) ?? [])
             .compactMap { extract.appendingPathComponent($0).path }
             .first { $0.hasSuffix("/bun") && FileManager.default.isExecutableFile(atPath: $0) }
         guard let bunBin else {

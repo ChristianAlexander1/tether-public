@@ -54,38 +54,71 @@ the Mac keyboard (Simulator → I/O → Input → *Send Keyboard Input to Device
 
 ## Things to try
 
+You are in **Alpine Linux** (workspace = `/work`). Install tools with `apk` like a container:
+
 ```sh
-# shell
-echo hi > a.txt ; cat a.txt ; ls | wc -l
-printf "b\na\nc\n" > l.txt ; sort l.txt | head -2
-if [ -f a.txt ]; then echo yes; fi
-i=0; while [ $i -lt 3 ]; do echo n$i; i=$((i+1)); done
-echo count=$(ls | wc -l)
-
-# text tools
-awk '{print NR, $1}' l.txt
-sed 's/a/A/g' l.txt
-diff a.txt l.txt
-
-# Python  (real CPython 3.14)
+uname -a
+apk update
+apk add git python3
+git --version
 python3 -c 'print(6*7)'
-python3 -c 'import ssl, sqlite3; print("ok")'
-pip install rich          # installs into $HOME/python
 
-# Node (real Node.js)
+# Host-backed (same prompt — look like normal commands):
 node -e 'console.log(2+2)'
-npm install express       # installs into ./node_modules of the current folder
-
-# Linux lane — this is where you install anything else
-linux /sbin/apk update
-linux /sbin/apk add git
-linux /usr/bin/git --version      # → git version 2.45.4  (verified)
-linux /sbin/apk add python3 curl vim gcc make
-linux /bin/sh                     # a full Alpine shell
+claude --version
+claude login
 ```
 
-**Verified working:** `apk update` reports **24,181 packages available**, and
-`apk add git` installed 13 packages and ran `git version 2.45.4`.
+**Temp debug:** toolbar clipboard icon copies the full terminal log (commands +
+output + errors, ANSI stripped) so you can paste it into chat. Remove later.
+
+Set `TERMX_LOG_OPEN=1` to also mirror browser-open lines to the Xcode console.
+
+The **Copy log** button (toolbar clipboard) bundles everything needed for debugging:
+
+- **format: 3** — app version, device/simulator, Claude/Linux runtime state
+- **Browser / open debug** — every `which open`, `xdg-open`, spawn intercept, Safari present
+- **Claude login checklist** — shown automatically when no open events were recorded yet
+- **Terminal output** — your session text (ANSI stripped)
+
+Paste the **entire** clipboard contents into chat. If `format: 3` is missing, ⌘R rebuild and
+reinstall on the Simulator.
+
+### Browser / OAuth / localhost
+
+`xdg-open` and `python3 -m webbrowser` open **inside the Tether app** (in-app Safari
+sheet), not on your Mac desktop.
+
+| URL kind | What happens |
+|---|---|
+| `https://…` (normal sites) | In-app Safari sheet inside the Simulator |
+| Google / Anthropic / GitHub login | In-app Safari sheet; OAuth redirects to host `127.0.0.1` reach the Node listener inside the app |
+| `http://127.0.0.1:PORT/…` from Alpine (`python3 -m http.server`) | **Guest localhost preview** — Alpine’s 127.0.0.1 is not Simulator Safari’s; Tether fetches the page with `curl` inside Linux and shows it in-app |
+| `http://127.0.0.1:…` from Claude/Node OAuth | In-app browser; redirect completes on the iOS loopback where Node listens |
+
+**Do not use Mac Safari** to test `python3 -m http.server` from the Tether terminal — `http://127.0.0.1:9999` on your MacBook is your **Mac**, not the Alpine guest inside the app. Only `xdg-open` inside Tether hits the guest server.
+
+**Guest localhost recipe** (order matters — server must be running *before* `xdg-open`):
+
+```sh
+apk add python3          # once
+echo '<h1>hello from guest</h1>' > index.html
+python3 -m http.server 9999 &
+sleep 1
+xdg-open http://127.0.0.1:9999/
+```
+
+New shells auto-run `pkill` for stale `http.server` jobs left over when the app was closed.
+Check guest port: `ss -ltn | grep 9999` (inside Tether terminal).
+
+**Copy log:** use the toolbar clipboard button. A good log includes
+`log format: 2` and `=== Browser / open debug ===`. If those lines are missing, ⌘R
+rebuild — you are on an old build.
+
+`uname` shows hostname **`tether`** (not your MacBook name). Bare `claude` opens
+the interactive UI; if it ever crashes, copy the log and paste it here.
+
+Legacy host shell (debug only): launch with `TERMX_HOST_SHELL=1`.
 
 ## Where installed things are stored (and how to reclaim space)
 
@@ -144,11 +177,13 @@ xcodebuild -scheme Tether -destination 'platform=iOS Simulator,name=iPhone 17 Pr
   -skipPackagePluginValidation -skipMacroValidation test
 ```
 
-## Notes / current limits
+## Notes
 
-- **`git` is not a built-in command yet** — use the Linux lane (`linux /usr/bin/git …`).
-  A native `git` (libgit2) is still on the roadmap.
-- The Linux lane is an **x86-64 interpreter**, so guest programs are slower than native
-  ones. Native `python3`/`node` and the built-in commands run at full speed.
-- `claude` is installed via npm (`@anthropic-ai/claude-code@2.1.110`). Run
-  `claude --version`, then `claude login` with your Anthropic account.
+- The session **is Alpine** (Blink x86-64). Use `apk add git python3 …` — those run as **guest
+  ELFs**, not host hacks. Workspace files live at `/work`. Only manifest-listed stubs
+  (`node`/`npm`/`claude`) and URL openers (`open`/`xdg-open`) cross to the host.
+- **Platform contract:** `docs/GUEST-PLATFORM.md`
+- **Laptop continuity:** `/work` is your real picked folder (including `.git`).
+- **Parallel development:** hand off tracks from `docs/agent-briefs/` (one `.md` per agent).
+- **After all zips:** `docs/agent-briefs/MERGE-AND-VERIFY.md`
+- **Architecture & gaps:** `docs/GUEST-PLATFORM.md`, `docs/LIMITATIONS.md`, `docs/06-linux-emulation.md`.

@@ -1,0 +1,5 @@
+{
+  "name": "git-status",
+  "spawn": { "kind": "spawn", "file": "git", "args": ["status", "--short"], "cwd": "/work", "env": { "WAYLAND_DISPLAY": "tether" }, "interactive": false },
+  "expect": { "exit": 0 }
+}

@@ -13,6 +13,20 @@ int termx_blink_run(const char *prog, char *const argv[], char *const envp[],
   return -1;
 }
 void termx_blink_interrupt(void) {}
+int termx_blink_is_busy(void) { return 0; }
+void termx_blink_set_host_exec(termx_host_exec_fn fn, void *ctx) {
+  (void)fn;
+  (void)ctx;
+}
+void termx_blink_dispatch_reset(void) {}
+int termx_blink_dispatch_add(const char *basename) {
+  (void)basename;
+  return 0;
+}
+int termx_blink_dispatch_should_proxy(const char *prog) {
+  (void)prog;
+  return 0;
+}
 
 #else
 
