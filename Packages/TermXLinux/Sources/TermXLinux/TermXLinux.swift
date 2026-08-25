@@ -260,6 +260,13 @@ public final class BlinkLinuxService: LinuxGuestRuntime {
         runtime.interrupt()
     }
 
+    public func terminate() {
+        lock.lock()
+        interrupted = true
+        lock.unlock()
+        runtime.terminate()
+    }
+
     /// True while the login shell (or any guest program) owns Blink's global machine.
     /// A second `run()` during this window replaces the machine and kills the session.
     public var isGuestMachineActive: Bool {

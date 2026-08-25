@@ -14,6 +14,38 @@ const { PassThrough } = require('stream');
 let stdinOverride = null;
 /** @type {import('stream').Stream | null} */
 let savedStdin = null;
+/** @type {Map<string | symbol, Function[]> | null} */
+let savedProcessListeners = null;
+
+/** Snapshot process listeners before a CLI mutates the persistent Node process. */
+function beginJob() {
+  savedProcessListeners = new Map();
+  for (const event of process.eventNames()) {
+    savedProcessListeners.set(event, process.rawListeners(event).slice());
+  }
+}
+
+/**
+ * Remove listeners installed by the completed CLI and restore the engine's
+ * exact pre-job listener set, including once-listener semantics.
+ */
+function restoreProcessListeners() {
+  if (!savedProcessListeners) return;
+  const events = new Set([...process.eventNames(), ...savedProcessListeners.keys()]);
+  for (const event of events) {
+    try { process.removeAllListeners(event); } catch (_) { /* ignore */ }
+    for (const listener of savedProcessListeners.get(event) || []) {
+      try {
+        if (typeof listener.listener === 'function') {
+          process.once(event, listener.listener);
+        } else {
+          process.on(event, listener);
+        }
+      } catch (_) { /* ignore */ }
+    }
+  }
+  savedProcessListeners = null;
+}
 
 function bindStdinFromJob(job) {
   savedStdin = process.stdin;
@@ -188,29 +220,19 @@ function silenceEventLoopStorm() {
   }, 0);
 }
 
-/** ora/npm progress spinners hide the cursor and redraw with \\r — reset on job end. */
-function clearProgressLine() {
-  try {
-    process.stderr.write('\x1b[?25h\x1b[2K\r');
-  } catch (_) { /* ignore */ }
-  try {
-    process.stdout.write('\x1b[2K\r');
-  } catch (_) { /* ignore */ }
-}
-
 function finishJob(keepRef, ipc) {
-  if ((process.env.TETHER_INTERACTIVE ?? process.env.TERMX_INTERACTIVE) === '1') {
-    clearProgressLine();
-  }
   silenceEventLoopStorm();
   teardownJob(keepRef);
   restoreStdin();
+  restoreProcessListeners();
   try { ipc.clearTransport(); } catch (_) { /* ignore */ }
 }
 
 module.exports = {
+  beginJob,
   bindStdinFromJob,
   restoreStdin,
+  restoreProcessListeners,
   teardownJob,
   silenceEventLoopStorm,
   finishJob,

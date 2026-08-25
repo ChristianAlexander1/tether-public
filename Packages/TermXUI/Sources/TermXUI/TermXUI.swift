@@ -20,6 +20,8 @@ public enum TerminalTheme: String, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
 
+    var isDark: Bool { self != .paper }
+
     public var palette: TerminalPalette {
         switch self {
         case .midnight:
@@ -218,7 +220,7 @@ public final class TerminalSession: ObservableObject, Identifiable {
     private static func stripANSI(_ text: String) -> String {
         // CSI / OSC / simple ESC sequences — keep plain text for pasting into chat.
         let patterns = [
-            "\u{001B}\\[[0-9;?]*[ -/]*[@-~]",
+            "\u{001B}\\[[0-?]*[ -/]*[@-~]",
             "\u{001B}\\][^\u{0007}]*(\u{0007}|\u{001B}\\\\)",
             "\u{001B}[()][0-9A-Za-z]",
             "\u{001B}.",

@@ -24,6 +24,9 @@ int termx_blink_run(const char *prog, char *const argv[], char *const envp[],
 /// Request cooperative interruption of the running guest (maps to SIGINT delivery).
 void termx_blink_interrupt(void);
 
+/// Request cooperative termination of the running guest (maps to SIGTERM delivery).
+void termx_blink_terminate(void);
+
 /// Non-zero while a guest program (e.g. the interactive login shell) owns g_machine.
 /// Starting another termx_blink_run while busy replaces the machine and crashes the session.
 int termx_blink_is_busy(void);

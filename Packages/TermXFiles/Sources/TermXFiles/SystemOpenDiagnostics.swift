@@ -43,7 +43,7 @@ public final class SystemOpenDiagnostics: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if lines.isEmpty {
-            return "(no browser/open events recorded yet — try xdg-open https://example.com)"
+            return "(no browser/open requests in this app session)"
         }
         return lines.joined(separator: "\n")
     }

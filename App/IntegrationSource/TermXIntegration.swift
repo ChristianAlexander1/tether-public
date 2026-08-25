@@ -47,7 +47,7 @@ public final class TermXIntegration {
         let lane = ClaudeRuntimeProbe.detect(home: home)
         let launcher = ClaudeRuntimeProbe.launcherPath(home: home)
         let shim = ClaudeRuntimeProbe.shimPath(home: home)
-        let js = ClaudeRuntimeProbe.extractedJSPath(home: home)
+        let js = ClaudeRuntimeProbe.applicationEntryPath(home: home)
         var shimHasWhichFix = false
         if let shimText = try? String(contentsOfFile: shim, encoding: .utf8) {
             shimHasWhichFix = shimText.contains("openers.has(cmd)")
@@ -55,13 +55,17 @@ public final class TermXIntegration {
         var lines: [String] = [
             "engine: Alpine Linux (Blink) primary",
             "TETHER_HOST_SHELL: \(ProcessInfo.processInfo.environment["TETHER_HOST_SHELL"] ?? ProcessInfo.processInfo.environment["TERMX_HOST_SHELL"] ?? "0")",
+            "automation.uiTest: \((ProcessInfo.processInfo.environment["TETHER_UI_TEST_MODE"] ?? ProcessInfo.processInfo.environment["TERMX_UI_TEST_MODE"]) == "1" ? "yes" : "no")",
+            "automation.commands: \((ProcessInfo.processInfo.environment["TETHER_AUTOCOMMANDS"] ?? ProcessInfo.processInfo.environment["TERMX_AUTOCOMMANDS"])?.isEmpty == false ? "configured (ignored outside UI-test mode)" : "none")",
+            "runtime.storage: \(docs) (app-owned; manage from Storage)",
             "linux.state: \(linux.state)",
             "linux.rootfs: \(linux.rootfs.path)",
             "linux.blink.ready: \(linux.state == .ready ? "yes" : "no")",
-            "claude.state: \(claude.state)",
+            "claude.state: \(claude.state(home: home))",
             "claude.lane: \(lane.map { String(describing: $0) } ?? "none")",
             "claude.launcher: \(fm.fileExists(atPath: launcher) ? "yes" : "no") \(launcher)",
-            "claude.extractedJS: \(fm.fileExists(atPath: js) ? "yes" : "no")",
+            "claude.extractedJS: \(js != nil ? "yes" : "no")",
+            "claude.bundle: \(ClaudeRuntimeProbe.usesSplitBundle(home: home) ? "split ESM graph" : (js != nil ? "single CommonJS" : "none"))",
             "claude.bun-shim: \(fm.fileExists(atPath: shim) ? "yes" : "no")",
             "browser.bridge: generic child-process opener",
             "claude.shim.whichOpenFix: \(shimHasWhichFix ? "yes" : "NO — rebuild app")",
@@ -296,25 +300,18 @@ public final class TermXIntegration {
             } else if self.dispatchManifest.hostHandler(for: name) == "node-mobile" {
                 switch name {
                 case "claude":
-                    if self.claude.state == .notInstalled {
-                        do {
-                            _ = try await self.claude.install(
-                                cwd: hostCwd, env: env, fds: fds
-                            )
-                        } catch {
-                            let msg = "claude: \(error)\n"
-                            let fd = fds.2 >= 0 ? fds.2 : fds.1
-                            if fd >= 0 {
-                                msg.withCString { _ = write(fd, $0, strlen($0)) }
-                            }
-                            box.value = 1
-                            sem.signal()
-                            return
+                    do {
+                        box.value = try await self.claude.run(
+                            argv: argv, cwd: hostCwd, env: env, fds: fds
+                        )
+                    } catch {
+                        let msg = "claude: \(error)\n"
+                        let fd = fds.2 >= 0 ? fds.2 : fds.1
+                        if fd >= 0 {
+                            msg.withCString { _ = write(fd, $0, strlen($0)) }
                         }
+                        box.value = 1
                     }
-                    box.value = await self.claude.execute(
-                        argv: argv, cwd: hostCwd, env: env, fds: fds
-                    )
                 case "node", "npm", "npx":
                     let interactive = (fds.1 >= 0 && isatty(fds.1) != 0)
                         || (fds.2 >= 0 && isatty(fds.2) != 0)
@@ -407,32 +404,15 @@ public final class TermXIntegration {
             guard let self else { return 127 }
             let (i, o, e) = currentFDs()
             return runBlocking {
-                if argv.count == 1 {
-                    do {
-                        return try await self.claude.run(
-                            cwd: state.cwd, env: state.environ, fds: (i, o, e)
-                        )
-                    } catch {
-                        writeErr(e, "claude: \(error)\n")
-                        return 1
-                    }
+                do {
+                    return try await self.claude.run(
+                        argv: argv, cwd: state.cwd,
+                        env: state.environ, fds: (i, o, e)
+                    )
+                } catch {
+                    writeErr(e, "claude: \(error)\n")
+                    return 1
                 }
-                if argv[1] == "login" {
-                    return await self.claude.login(cwd: state.cwd, env: state.environ, fds: (i, o, e))
-                }
-                if self.claude.state == .notInstalled {
-                    do {
-                        _ = try await self.claude.install(
-                            cwd: state.cwd, env: state.environ, fds: (i, o, e)
-                        )
-                    } catch {
-                        writeErr(e, "claude: \(error)\n")
-                        return 1
-                    }
-                }
-                return await self.claude.execute(
-                    argv: argv, cwd: state.cwd, env: state.environ, fds: (i, o, e)
-                )
             }
         }
         _ = session.registry.register(name: "linux") { [weak self] argv in

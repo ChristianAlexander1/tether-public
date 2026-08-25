@@ -209,7 +209,7 @@ final class TermXUIAcceptanceTests: XCTestCase {
 
     func testCopyableTranscriptIncludesMetadataAndStripsANSI() {
         let session = TerminalSession(cwd: "/workspaces/demo", engine: RecordingEngine())
-        session.appendTranscriptForTesting(Data("\u{001B}[31merror: boom\u{001B}[0m\nok\n".utf8))
+        session.appendTranscriptForTesting(Data("\u{001B}[31merror: boom\u{001B}[0m\u{001B}[<u\nok\n".utf8))
         let text = session.copyableTranscript()
         XCTAssertTrue(text.contains("Tether diagnostic log"))
         XCTAssertTrue(text.contains("format: 3"))
@@ -218,6 +218,7 @@ final class TermXUIAcceptanceTests: XCTestCase {
         XCTAssertTrue(text.contains("error: boom"))
         XCTAssertTrue(text.contains("ok"))
         XCTAssertFalse(text.contains("\u{001B}["), "ANSI CSI should be stripped for chat paste")
+        XCTAssertFalse(text.contains("<u"), "CSI parameter bytes must not leak into copied diagnostics")
     }
 }
 #endif

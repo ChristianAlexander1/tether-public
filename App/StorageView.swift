@@ -1,4 +1,5 @@
 import SwiftUI
+import TermXClaude
 
 /// Shows what Tether is keeping on disk and lets the user reclaim it.
 /// Everything listed lives inside the app's own sandbox — the folders the user picked
@@ -49,6 +50,14 @@ struct StorageView: View {
         }
         .task { model.measure() }
         .refreshable { model.measure() }
+        .alert("Unable to remove item", isPresented: Binding(
+            get: { model.errorMessage != nil },
+            set: { if !$0 { model.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.errorMessage ?? "Unknown error")
+        }
         .confirmationDialog(
             pendingDeletion.map { "Delete \($0.name)?" } ?? "",
             isPresented: Binding(get: { pendingDeletion != nil },
@@ -87,7 +96,7 @@ private struct StorageRow: View {
 }
 
 struct StorageEntry: Identifiable {
-    var id: String { path }
+    let id: String
     let name: String
     let detail: String
     let path: String
@@ -102,6 +111,7 @@ final class StorageModel: ObservableObject {
     @Published private(set) var entries: [StorageEntry] = []
     @Published private(set) var total: Int64?
     @Published private(set) var isMeasuring = false
+    @Published var errorMessage: String?
 
     var cacheTotal: Int64 { entries.filter(\.isCache).reduce(0) { $0 + $1.bytes } }
 
@@ -109,28 +119,31 @@ final class StorageModel: ObservableObject {
     private var documents: String { home + "/Documents" }
 
     private struct Candidate {
-        let name: String, detail: String, path: String
+        let id: String, name: String, detail: String, path: String
         let removable: Bool, cache: Bool, warning: String
     }
 
     private var candidates: [Candidate] {
         [
-            Candidate(name: "Linux packages", detail: "Alpine guest — apk add",
+            Candidate(id: "claude", name: "Claude Code", detail: "globally installed CLI and runtime dependencies",
+                      path: ClaudeInstallation.installRoot(home: documents), removable: true, cache: false,
+                      warning: "Uninstalls Claude Code and its private runtime dependencies. Your workspace files and Claude settings are preserved; running claude later installs the current release again."),
+            Candidate(id: "linux", name: "Linux packages", detail: "Alpine guest — apk add",
                       path: documents + "/linux", removable: true, cache: false,
                       warning: "Removes every package installed with apk, including git. Tether re-downloads a fresh Alpine base the next time you use the linux command."),
-            Candidate(name: "Python packages", detail: "installed with pip",
-                      path: home + "/python", removable: true, cache: false,
+            Candidate(id: "python", name: "Python packages", detail: "globally installed with pip",
+                      path: documents + "/python", removable: true, cache: false,
                       warning: "Removes every package installed with pip. Python itself stays."),
-            Candidate(name: "Node packages", detail: "installed with npm -g",
-                      path: home + "/node", removable: true, cache: false,
+            Candidate(id: "node", name: "Node packages", detail: "globally installed with npm -g",
+                      path: documents + "/node", removable: true, cache: false,
                       warning: "Removes globally installed npm packages. Node itself stays."),
-            Candidate(name: "npm cache", detail: "safe to delete",
-                      path: home + "/.npm", removable: true, cache: true,
+            Candidate(id: "npm-cache", name: "npm cache", detail: "safe to delete",
+                      path: documents + "/.npm", removable: true, cache: true,
                       warning: "Only cached downloads are removed; packages keep working."),
-            Candidate(name: "pip cache", detail: "safe to delete",
-                      path: home + "/.cache/pip", removable: true, cache: true,
+            Candidate(id: "pip-cache", name: "pip cache", detail: "safe to delete",
+                      path: documents + "/.cache/pip", removable: true, cache: true,
                       warning: "Only cached downloads are removed; packages keep working."),
-            Candidate(name: "Temporary files", detail: "safe to delete",
+            Candidate(id: "temporary", name: "Temporary files", detail: "safe to delete",
                       path: NSTemporaryDirectory(), removable: true, cache: true,
                       warning: "Removes scratch files. Nothing installed is affected."),
         ]
@@ -152,14 +165,15 @@ final class StorageModel: ObservableObject {
                 let size = Self.directorySize(c.path)
                 guard size > 0 else { continue }
                 sum += size
-                found.append(StorageEntry(name: c.name, detail: c.detail, path: c.path,
+                found.append(StorageEntry(id: c.id, name: c.name, detail: c.detail, path: c.path,
                                           bytes: size, isRemovable: c.removable,
                                           isCache: c.cache, removalWarning: c.warning))
             }
             let sorted = found.sorted { $0.bytes > $1.bytes }
+            let measuredTotal = sum
             await MainActor.run {
                 self.entries = sorted
-                self.total = sum
+                self.total = measuredTotal
                 self.isMeasuring = false
                 if self.remeasureQueued { self.measure() }
             }
@@ -167,13 +181,26 @@ final class StorageModel: ObservableObject {
     }
 
     func clear(_ entry: StorageEntry) {
-        Self.remove(entry.path, preservingDirectory: entry.isCache)
+        do {
+            if entry.id == "claude" {
+                try ClaudeInstallation.uninstall(home: documents)
+            } else {
+                try Self.remove(entry.path, preservingDirectory: entry.isCache)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
         measure()
     }
 
     func clearAllCaches() {
         for entry in entries where entry.isCache {
-            Self.remove(entry.path, preservingDirectory: true)
+            do {
+                try Self.remove(entry.path, preservingDirectory: true)
+            } catch {
+                errorMessage = error.localizedDescription
+                break
+            }
         }
         measure()
     }
@@ -181,15 +208,15 @@ final class StorageModel: ObservableObject {
     /// Deletes `path`. Cache directories are emptied rather than removed: iOS
     /// expects NSTemporaryDirectory() to keep existing, and deleting it makes
     /// every later write into it fail.
-    nonisolated static func remove(_ path: String, preservingDirectory: Bool) {
+    nonisolated static func remove(_ path: String, preservingDirectory: Bool) throws {
         let fm = FileManager.default
         guard preservingDirectory else {
-            try? fm.removeItem(atPath: path)
+            try fm.removeItem(atPath: path)
             return
         }
         guard let names = try? fm.contentsOfDirectory(atPath: path) else { return }
         for name in names {
-            try? fm.removeItem(atPath: (path as NSString).appendingPathComponent(name))
+            try fm.removeItem(atPath: (path as NSString).appendingPathComponent(name))
         }
     }
 

@@ -8,14 +8,22 @@ final class TerminalOutputPump {
     private let lock = NSLock()
     private var pending = Data()
     private weak var terminalView: TerminalView?
+    private let protocolAdapter: TerminalProtocolAdapter
     private var displayLink: CADisplayLink?
     private var maxFrameBytes = 256 * 1024
     var frameInterval: CFTimeInterval = 1.0 / 60.0
     private(set) var lastFrameDuration: CFTimeInterval = 0
     private(set) var framesRendered = 0
 
-    init(terminalView: TerminalView) {
+    init(terminalView: TerminalView, isDark: Bool, sendReply: @escaping (Data) -> Void) {
         self.terminalView = terminalView
+        protocolAdapter = TerminalProtocolAdapter(isDark: isDark, sendReply: sendReply)
+    }
+
+    func updateColorScheme(isDark: Bool) {
+        lock.lock()
+        protocolAdapter.updateColorScheme(isDark: isDark)
+        lock.unlock()
     }
 
     func start() {
@@ -36,7 +44,7 @@ final class TerminalOutputPump {
     func enqueue(_ data: Data) {
         guard !data.isEmpty else { return }
         lock.lock()
-        pending.append(data)
+        pending.append(protocolAdapter.process(data))
         lock.unlock()
         resumeDisplayLink()
     }

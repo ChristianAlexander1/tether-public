@@ -21,18 +21,29 @@ final class AppModel: ObservableObject {
     @Published var errorMessage: String?
 
     init() {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         #if DEBUG
-        // Simulator/UI-test hook only: TETHER_AUTOWORKSPACE=1 opens a Documents workspace
-        // without the picker. Compiled out of release builds; users always pick a folder.
+        // A test workspace must never become a user's remembered workspace.
+        // Remove records left by older builds before creating a transient one.
+        workspaces.removeLocalWorkspaceRegistrations(rootURL: docs)
         let testEnvironment = ProcessInfo.processInfo.environment
-        if (testEnvironment["TETHER_AUTOWORKSPACE"] ?? testEnvironment["TERMX_AUTOWORKSPACE"]) == "1" {
-            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let isUITest = (testEnvironment["TETHER_UI_TEST_MODE"]
+            ?? testEnvironment["TERMX_UI_TEST_MODE"]) == "1"
+        if isUITest,
+           (testEnvironment["TETHER_AUTOWORKSPACE"]
+            ?? testEnvironment["TERMX_AUTOWORKSPACE"]) == "1" {
             let ws = Workspace(name: "Documents", mountPath: "/workspaces/Documents")
-            if (try? workspaces.registerLocalWorkspaceForTesting(ws, rootURL: docs)) != nil {
+            if (try? workspaces.registerLocalWorkspaceForTesting(
+                ws, rootURL: docs, persisted: false
+            )) != nil {
                 selected = ws
                 return
             }
         }
+        #else
+        // Migrate away any DEBUG automation bookmark that reached a release
+        // container through a restored Simulator backup.
+        workspaces.removeLocalWorkspaceRegistrations(rootURL: docs)
         #endif
         // Reopen the last folder the user picked. If the bookmark is stale,
         // WorkspaceView shows an error and returns them to the picker.
@@ -46,6 +57,11 @@ final class AppModel: ObservableObject {
 
     func closeWorkspace() {
         selected = nil
+    }
+
+    func forgetWorkspace(_ workspace: Workspace) {
+        workspaces.removeWorkspace(workspace)
+        if selected?.id == workspace.id { selected = nil }
     }
 }
 
@@ -77,7 +93,7 @@ struct RootView: View {
                 VStack(spacing: 14) {
                     Image(systemName: "folder.badge.plus").font(.system(size: 44)).foregroundStyle(.secondary)
                     Text("Choose a workspace").font(.title2.bold())
-                    Text("Tether runs commands only inside a folder you explicitly select.")
+                    Text("Choose a folder from Files. Tether keeps Linux and global tools separately in app storage.")
                         .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -146,6 +162,7 @@ struct WorkspaceView: View {
     @State private var showFiles = false
     @State private var showStorage = false
     @State private var showLicenses = false
+    @State private var didTearDown = false
 
     var body: some View {
         Group {
@@ -159,7 +176,7 @@ struct WorkspaceView: View {
                     message: "Pick it again with Add Folder. iOS sometimes needs a fresh permission after the app is closed.",
                     actionTitle: "Choose another folder"
                 ) {
-                    model.closeWorkspace()
+                    model.forgetWorkspace(workspace)
                 }
             } else if startFailed {
                 workspaceErrorView(
@@ -197,6 +214,7 @@ struct WorkspaceView: View {
                     Button("Close workspace", role: .destructive) {
                         model.closeWorkspace()
                     }
+                    .accessibilityIdentifier("closeWorkspace")
                 } label: { Image(systemName: "sidebar.leading") }
                 .accessibilityIdentifier("workspaceMenu")
             }
@@ -288,6 +306,7 @@ struct WorkspaceView: View {
             return
         }
         resolvedPath = path
+        didTearDown = false
         let newSession = TerminalSession(cwd: path, engine: model.engine)
         do {
             try newSession.start()
@@ -313,6 +332,8 @@ struct WorkspaceView: View {
         // newline limits for longer acceptance batches.
         let script: String? = {
             let environment = ProcessInfo.processInfo.environment
+            guard (environment["TETHER_UI_TEST_MODE"]
+                ?? environment["TERMX_UI_TEST_MODE"]) == "1" else { return nil }
             if let path = environment["TETHER_AUTOCOMMAND_FILE"] ?? environment["TERMX_AUTOCOMMAND_FILE"],
                !path.isEmpty,
                let fromFile = try? String(contentsOfFile: path, encoding: .utf8) {
@@ -355,13 +376,18 @@ struct WorkspaceView: View {
     }
 
     private func teardownSession() {
+        guard !didTearDown else { return }
+        didTearDown = true
         model.integration.interruptActiveRuntimes()
         let stopping = session
         session = nil
-        resolvedPath = nil
-        model.workspaces.endAccess(workspace)
-        Task.detached(priority: .userInitiated) {
-            stopping?.terminate()
+        // terminate() only requests guest shutdown and schedules PTY closing; it
+        // never waits on the main thread. Request it before releasing the iOS
+        // security scope so the guest cannot race a revoked workspace mount.
+        stopping?.terminate()
+        if resolvedPath != nil {
+            model.workspaces.endAccess(workspace)
         }
+        resolvedPath = nil
     }
 }

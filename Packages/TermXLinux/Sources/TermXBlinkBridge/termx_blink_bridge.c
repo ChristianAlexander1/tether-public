@@ -10,6 +10,7 @@
 #include <setjmp.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,8 +42,17 @@ static bool g_initialized;
 static volatile sig_atomic_t g_interrupted;
 static jmp_buf g_exit_jmp;
 static int g_guest_exit;
+/* Blink is a command-line program upstream, so its main guest exits through
+ * exit(3). In an embedded app that must unwind to the outer termx_blink_run
+ * boundary instead. The release/acquire pair publishes that boundary before
+ * the interposed exit can observe an active run. */
+static _Atomic bool g_embedded_run_active;
+static pthread_t g_embedded_run_thread;
 static termx_host_exec_fn g_host_exec;
 static void *g_host_exec_ctx;
+/* Protects bridge-side publication and retirement of Blink's global machine.
+ * UI teardown may request a guest signal from a different thread. */
+static pthread_mutex_t g_machine_mu = PTHREAD_MUTEX_INITIALIZER;
 
 /* Parent-only worker: Blink ash fork()+exec would otherwise call Swift/Node
  * inside the child process (unsafe after fork). Requests go over a socketpair. */
@@ -394,9 +404,24 @@ void termx_blink_set_host_exec(termx_host_exec_fn fn, void *ctx) {
   if (fn) (void)ensure_host_exec_worker();
 }
 
-void exit(int status) {
-  g_guest_exit = status & 255;
-  longjmp(g_exit_jmp, 1);
+static _Noreturn void termx_blink_finish_guest(int status) {
+  bool active = atomic_load_explicit(&g_embedded_run_active, memory_order_acquire);
+  bool runner = active && pthread_equal(pthread_self(), g_embedded_run_thread);
+  if (active && runner) {
+    pthread_mutex_lock(&g_machine_mu);
+    /* SysExitGroup has already freed the machine before calling exit. */
+    g_machine = NULL;
+    pthread_mutex_unlock(&g_machine_mu);
+    g_guest_exit = status & 255;
+    longjmp(g_exit_jmp, 1);
+  }
+
+  /* A host-side exit outside the active guest retains normal libc behavior. */
+  _exit(status);
+}
+
+_Noreturn void exit(int status) {
+  termx_blink_finish_guest(status);
 }
 
 void TerminateSignal(struct Machine *m, int sig, int code) {
@@ -407,7 +432,9 @@ void TerminateSignal(struct Machine *m, int sig, int code) {
   DisableJit(&m->system->jit);
 #endif
   syssig = XlatSignal(sig);
+  pthread_mutex_lock(&g_machine_mu);
   if (g_machine == m) g_machine = NULL;  /* don't leave a dangling machine */
+  pthread_mutex_unlock(&g_machine_mu);
   FreeMachine(m);
 #ifdef HAVE_JIT
   ShutdownJit();
@@ -445,8 +472,11 @@ static int TermxExec(char *execfn, char *prog, char **argv, char **envp) {
     }
   }
 
+  pthread_mutex_lock(&g_machine_mu);
   if ((old = g_machine)) KillOtherThreads(old->system);
-  unassert((g_machine = m = NewMachine(NewSystem(XED_MACHINE_MODE_LONG), 0)));
+  g_machine = m = NewMachine(NewSystem(XED_MACHINE_MODE_LONG), 0);
+  pthread_mutex_unlock(&g_machine_mu);
+  unassert(m);
 
 #ifdef HAVE_JIT
   DisableJit(&m->system->jit);
@@ -483,10 +513,7 @@ static int TermxExec(char *execfn, char *prog, char **argv, char **envp) {
 
   if (g_interrupted) return 130;
 
-  g_guest_exit = 1;
-  if (setjmp(g_exit_jmp) == 0) {
-    Blink(m);
-  }
+  Blink(m);
   return g_guest_exit;
 }
 
@@ -511,13 +538,7 @@ int termx_blink_init(const char *rootfs_prefix) {
     return -EIO;
   }
 
-  struct sigaction sa;
   signal(SIGPIPE, SIG_IGN);
-  sigfillset(&sa.sa_mask);
-  sa.sa_flags = 0;
-  sa.sa_sigaction = OnSignal;
-  sigaction(SIGINT, &sa, 0);
-  sigaction(SIGTERM, &sa, 0);
 
   InitBus();
   g_initialized = true;
@@ -583,7 +604,18 @@ int termx_blink_run(const char *prog, char *const argv[], char *const envp[],
   }
 
   mutable_argv[0] = execfn;
-  rc = TermxExec(execfn, execfn, mutable_argv, (char **)envp);
+  g_guest_exit = 1;
+  g_embedded_run_thread = pthread_self();
+  atomic_store_explicit(&g_embedded_run_active, true, memory_order_release);
+  /* Keep one checkpoint around the whole run. Guest execve recursively calls
+   * TermxExec; putting setjmp there would unwind only the innermost exec and
+   * resume execution through a machine SysExitGroup has already freed. */
+  if (setjmp(g_exit_jmp) == 0) {
+    rc = TermxExec(execfn, execfn, mutable_argv, (char **)envp);
+  } else {
+    rc = g_guest_exit;
+  }
+  atomic_store_explicit(&g_embedded_run_active, false, memory_order_release);
 
 cleanup:
   if (mutable_argv) {
@@ -595,15 +627,33 @@ cleanup:
   return rc;
 }
 
-void termx_blink_interrupt(void) {
+static void termx_blink_enqueue_signal(int sig) {
   g_interrupted = 1;
+  pthread_mutex_lock(&g_machine_mu);
   if (g_machine) {
-    raise(SIGINT);
+    /* Queue a Linux guest signal directly. Using raise() here delivered a
+     * process signal on the calling (usually UIKit) thread even though Blink's
+     * setjmp and machine live on its worker thread, which could terminate the
+     * whole app during Close Workspace. */
+    EnqueueSignal(g_machine, sig);
   }
+  pthread_mutex_unlock(&g_machine_mu);
+}
+
+void termx_blink_interrupt(void) {
+  termx_blink_enqueue_signal(SIGINT_LINUX);
+}
+
+void termx_blink_terminate(void) {
+  termx_blink_enqueue_signal(SIGTERM_LINUX);
 }
 
 int termx_blink_is_busy(void) {
-  return g_machine != NULL ? 1 : 0;
+  int busy;
+  pthread_mutex_lock(&g_machine_mu);
+  busy = g_machine != NULL ? 1 : 0;
+  pthread_mutex_unlock(&g_machine_mu);
+  return busy;
 }
 
 #endif /* TERMX_BLINK_STUB */

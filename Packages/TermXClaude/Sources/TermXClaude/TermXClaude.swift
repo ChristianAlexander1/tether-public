@@ -42,27 +42,45 @@ public enum ClaudeError: Error, Equatable, CustomStringConvertible {
 }
 
 public final class ClaudeCodeService {
+    public typealias RuntimeInstaller = (
+        _ home: String,
+        _ progress: @escaping (String) -> Void
+    ) throws -> Void
+
     private let node: ClaudeNodeRunner
     private let linux: ClaudeLinuxRunner?
     private let defaults: UserDefaults
+    private let runtimeInstaller: RuntimeInstaller
     private let authKey = "termx.claude.authenticated"
     private let installedKey = "termx.claude.installed"
     private let laneKey = "termx.claude.lane"
 
-    /// Last-resort pure-JS npm pin when Bun extract cannot run.
-    public static let legacyJSPackage = "@anthropic-ai/claude-code@2.1.110"
-
-    public init(node: ClaudeNodeRunner, linux: ClaudeLinuxRunner? = nil,
-                defaults: UserDefaults = .standard) {
+    public init(
+        node: ClaudeNodeRunner,
+        linux: ClaudeLinuxRunner? = nil,
+        defaults: UserDefaults = .standard,
+        runtimeInstaller: @escaping RuntimeInstaller = { home, progress in
+            try ClaudeNodeInstaller.installIntoHome(home: home, progress: progress)
+        }
+    ) {
         self.node = node
         self.linux = linux
         self.defaults = defaults
+        self.runtimeInstaller = runtimeInstaller
     }
 
     public var state: ClaudeState {
         if defaults.bool(forKey: authKey) { return .authenticated }
         if defaults.bool(forKey: installedKey) { return .installed }
         return .notInstalled
+    }
+
+    /// Files are authoritative for a concrete runtime home. Preferences alone
+    /// cannot prove installation because Files/Storage may remove program data.
+    public func state(home: String) -> ClaudeState {
+        guard ClaudeRuntimeProbe.detect(home: home) != nil else { return .notInstalled }
+        if defaults.bool(forKey: authKey) { return .authenticated }
+        return .installed
     }
 
     public static func launchEnvironment(base: [String: String]) -> [String: String] {
@@ -101,51 +119,97 @@ public final class ClaudeCodeService {
             text.withCString { ptr in _ = Darwin.write(fds.1, ptr, strlen(ptr)) }
         }
 
-        emit("claude: using Node + extracted JS (world approach — Bun ELF cannot run under Blink).\n")
+        emit("claude: preparing its embedded Node compatibility runtime (the official Bun executable cannot run inside Blink).\n")
         do {
-            try ClaudeNodeInstaller.installIntoHome(home: home) { emit($0) }
+            try runtimeInstaller(home) { emit($0) }
             remember(lane: .embeddedNode)
             return await ensureClaudeNodeDeps(home: home, cwd: cwd, env: env, fds: fds)
         } catch {
-            emit("claude: Bun→Node install failed (\(error)); trying legacy JS pin…\n")
+            emit("claude: runtime install failed: \(error)\n")
+            throw ClaudeError.bootstrapFailed(String(describing: error))
         }
-
-        return try await installLegacyJS(cwd: cwd, env: env, fds: fds)
     }
 
     public func login(cwd: String, env: [String: String], fds: (Int32, Int32, Int32)) async -> Int32 {
-        let code = await execute(argv: ["claude", "login"], cwd: cwd, env: env, fds: fds)
-        if code == 0 { defaults.set(true, forKey: authKey) }
-        return code
+        do {
+            return try await run(
+                argv: ["claude", "login"], cwd: cwd, env: env, fds: fds
+            )
+        } catch {
+            emit("claude: \(error)\n", to: fds.2 >= 0 ? fds.2 : fds.1)
+            return 1
+        }
     }
 
     public func run(cwd: String, env: [String: String], fds: (Int32, Int32, Int32)) async throws -> Int32 {
+        try await run(argv: ["claude"], cwd: cwd, env: env, fds: fds)
+    }
+
+    /// Validate the on-disk installation for every command. This is the single
+    /// launch path used by both the Linux guest proxy and the host debug shell,
+    /// so manual folder deletion repairs itself instead of using stale flags.
+    public func run(
+        argv: [String], cwd: String, env: [String: String],
+        fds: (Int32, Int32, Int32)
+    ) async throws -> Int32 {
         let home = env["HOME"] ?? (NSHomeDirectory() as NSString).appendingPathComponent("Documents")
-        if ClaudeRuntimeProbe.detect(home: home) == nil && rememberedLane() == nil {
-            _ = try await install(cwd: cwd, env: env, fds: fds)
+        if let installedLane = ClaudeRuntimeProbe.detect(home: home) {
+            remember(lane: installedLane)
+        } else {
+            defaults.removeObject(forKey: installedKey)
+            defaults.removeObject(forKey: laneKey)
+            let installCode = try await install(cwd: cwd, env: env, fds: fds)
+            guard installCode == 0 else { throw ClaudeError.installationFailed(installCode) }
+            guard ClaudeRuntimeProbe.detect(home: home) != nil else {
+                throw ClaudeError.bootstrapFailed("runtime files missing after installation")
+            }
         }
-        guard state == .authenticated || state == .installed else {
-            throw ClaudeError.authenticationRequired
+        let code = await execute(
+            argv: argv.isEmpty ? ["claude"] : argv,
+            cwd: cwd, env: env, fds: fds
+        )
+        if code == 0, argv.dropFirst().first == "login" {
+            defaults.set(true, forKey: authKey)
         }
-        return await execute(argv: ["claude"], cwd: cwd, env: env, fds: fds)
+        return code
     }
 
     /// Run any `claude …` argv on the detected lane (no reinstall).
     public func execute(argv: [String], cwd: String, env: [String: String],
                         fds: (Int32, Int32, Int32)) async -> Int32 {
         let home = env["HOME"] ?? (NSHomeDirectory() as NSString).appendingPathComponent("Documents")
-        let lane = ClaudeRuntimeProbe.detect(home: home) ?? rememberedLane()
+        let lane = ClaudeRuntimeProbe.detect(home: home)
         var launchEnv = Self.launchEnvironment(base: env)
 
         switch lane {
         case .embeddedNode:
+            do {
+                try ClaudeNodeInstaller.ensureBundleLocation(home: home)
+            } catch {
+                emit(
+                    "claude: installed module graph could not be relocated: \(error)\n",
+                    to: fds.2 >= 0 ? fds.2 : fds.1
+                )
+                return 126
+            }
             if !ClaudeRuntimeProbe.nodeModulesReady(home: home) {
                 _ = await ensureClaudeNodeDeps(home: home, cwd: cwd, env: env, fds: fds)
             }
             // Always refresh launcher/shim from the app bundle (Segmenter polyfill, etc.).
             try? ClaudeNodeInstaller.ensureLauncherFiles(home: home)
             let launcher = ClaudeRuntimeProbe.launcherPath(home: home)
-            launchEnv["CLAUDE_CODE_JS"] = ClaudeRuntimeProbe.extractedJSPath(home: home)
+            let applicationEntry = ClaudeRuntimeProbe.applicationEntryPath(home: home)
+                ?? ClaudeRuntimeProbe.extractedJSPath(home: home)
+            launchEnv["CLAUDE_CODE_JS"] = applicationEntry
+            if ClaudeRuntimeProbe.usesSplitBundle(home: home) {
+                launchEnv["CLAUDE_CODE_ESM"] = "1"
+                launchEnv["CLAUDE_BUNFS_ROOT"] = (
+                    ClaudeRuntimeProbe.splitBundleRoot(home: home) as NSString
+                ).appendingPathComponent("root")
+            } else {
+                launchEnv.removeValue(forKey: "CLAUDE_CODE_ESM")
+                launchEnv.removeValue(forKey: "CLAUDE_BUNFS_ROOT")
+            }
             let forwarded = Array(argv.dropFirst())
             return await node.run(
                 argv: ["node", launcher] + forwarded,
@@ -154,7 +218,7 @@ public final class ClaudeCodeService {
                 stdinFD: fds.0, stdoutFD: fds.1, stderrFD: fds.2,
                 interactive: true
             )
-        case .legacyJS, .none:
+        case .legacyJS:
             return await node.run(
                 argv: argv.isEmpty ? ["claude"] : argv,
                 cwd: cwd,
@@ -162,6 +226,12 @@ public final class ClaudeCodeService {
                 stdinFD: fds.0, stdoutFD: fds.1, stderrFD: fds.2,
                 interactive: true
             )
+        case .none:
+            emit(
+                "claude: installation is incomplete; run claude again to repair it.\n",
+                to: fds.2 >= 0 ? fds.2 : fds.1
+            )
+            return 127
         }
     }
 
@@ -203,42 +273,14 @@ public final class ClaudeCodeService {
 
     // MARK: - Private
 
-    private func rememberedLane() -> ClaudeRuntimeLane? {
-        switch defaults.string(forKey: laneKey) {
-        case "node", "linux": return .embeddedNode // "linux" was old lane key; treat as node extract
-        case "legacy": return .legacyJS
-        default: return nil
-        }
-    }
-
     private func remember(lane: ClaudeRuntimeLane) {
         defaults.set(true, forKey: installedKey)
         defaults.set(lane == .legacyJS ? "legacy" : "node", forKey: laneKey)
     }
 
-    private func installLegacyJS(cwd: String, env: [String: String],
-                                 fds: (Int32, Int32, Int32)) async throws -> Int32 {
-        let home = env["HOME"] ?? NSHomeDirectory() + "/Documents"
-        if ClaudeRuntimeProbe.jsEntryPath(home: home) != nil {
-            remember(lane: .legacyJS)
-            return 0
-        }
-        var installEnv = env
-        installEnv["npm_config_prefix"] = installEnv["npm_config_prefix"] ?? "\(home)/node"
-        installEnv["npm_config_progress"] = "false"
-        let code = await node.run(
-            argv: ["npm", "install", "-g", Self.legacyJSPackage],
-            cwd: cwd,
-            env: installEnv,
-            stdinFD: fds.0, stdoutFD: fds.1, stderrFD: fds.2,
-            interactive: true
-        )
-        if code == 0 {
-            remember(lane: .legacyJS)
-        } else {
-            throw ClaudeError.installationFailed(code)
-        }
-        return code
+    private func emit(_ message: String, to fd: Int32) {
+        guard fd >= 0 else { return }
+        message.withCString { _ = Darwin.write(fd, $0, strlen($0)) }
     }
 }
 

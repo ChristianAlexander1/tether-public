@@ -303,6 +303,56 @@ final class FilesTests: XCTestCase {
         XCTAssertEqual(store2.activeAccessCount(for: restored[0]), 0)
     }
 
+    func testTransientAutomationWorkspaceDoesNotSurviveRelaunch() throws {
+        let suite = "TermXFilesTests.\(#function)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let root = try makeTempWorkspaceRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspace = Workspace(name: "Documents", mountPath: "/workspaces/Documents")
+
+        let activeStore = WorkspaceStore(defaults: defaults)
+        try activeStore.registerLocalWorkspaceForTesting(
+            workspace, rootURL: root, persisted: false
+        )
+        XCTAssertEqual(activeStore.restoreAll().map(\.id), [workspace.id])
+
+        XCTAssertTrue(WorkspaceStore(defaults: defaults).restoreAll().isEmpty)
+    }
+
+    func testLocalRegistrationCleanupMatchesResolvedFolderNotDisplayName() throws {
+        let store = makeStore()
+        let automationRoot = try makeTempWorkspaceRoot()
+        let userRoot = try makeTempWorkspaceRoot()
+        defer {
+            try? FileManager.default.removeItem(at: automationRoot)
+            try? FileManager.default.removeItem(at: userRoot)
+        }
+        let automation = Workspace(name: "Documents", mountPath: "/workspaces/Documents")
+        let realFolderWithSameName = Workspace(
+            name: "Documents", mountPath: "/workspaces/Documents-user"
+        )
+        try store.registerLocalWorkspaceForTesting(automation, rootURL: automationRoot)
+        try store.registerLocalWorkspaceForTesting(realFolderWithSameName, rootURL: userRoot)
+
+        store.removeLocalWorkspaceRegistrations(rootURL: automationRoot)
+
+        XCTAssertEqual(store.restoreAll().map(\.id), [realFolderWithSameName.id])
+    }
+
+    func testDeletedWorkspaceFailsCleanlyInsteadOfReturningDeadPath() throws {
+        let store = makeStore()
+        let root = try makeTempWorkspaceRoot()
+        let workspace = Workspace(name: "deleted", mountPath: "/workspaces/deleted")
+        try store.registerLocalWorkspaceForTesting(workspace, rootURL: root)
+        try FileManager.default.removeItem(at: root)
+
+        XCTAssertThrowsError(try store.beginLocalAccessForTesting(workspace)) { error in
+            XCTAssertEqual(error as? WorkspaceError, .missingBookmark)
+        }
+    }
+
     // MARK: - Access Scope Leak Test (100 cycles)
 
     func testAccessScopeBalancedAfter100Cycles() throws {

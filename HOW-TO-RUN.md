@@ -1,57 +1,119 @@
 # Build and run Tether
 
-## Prerequisites
+Run commands from the repository root.
 
-- macOS with the selected Xcode toolchain
-- `xcodegen`, Swift Package Manager, CMake, Node and npm
-- Homebrew `libarchive` + `pkg-config` for the fakefs creation tests
-- local `Frameworks/Blink.xcframework`, `NodeMobile.xcframework`, and
-  `TermXPython.xcframework` (build scripts are in `Frameworks/`)
+## Requirements
 
-## Automated gates
+- macOS with Xcode and an installed iOS Simulator runtime
+- XcodeGen: `brew install xcodegen`
+- Swift Package Manager, CMake, Node and npm
+- `brew install cmake libarchive pkgconf` for the complete validation suite
+- local `Frameworks/Blink.xcframework`, `Frameworks/NodeMobile.xcframework`,
+  and `Frameworks/TermXPython.xcframework`
 
-From the repository root:
+If a required framework is missing, build or fetch it with:
 
 ```sh
-./scripts/validate.sh --quick    # packages, JS, C libraries, WASI, scripts
-./scripts/validate.sh --network  # real Blink + Alpine download/apk acceptance
-./scripts/validate.sh --ios      # regenerate and build for iOS Simulator
-./scripts/validate.sh --all      # all three gates
+./Frameworks/build-blink.sh
+./Frameworks/build-nodejs-mobile.sh
+./Packages/TermXPython/Scripts/build-termx-python-xcframework.sh
 ```
 
-`--network` intentionally downloads an Alpine minirootfs and packages. It is
-separate from the deterministic quick gate.
+The framework scripts may download their pinned upstream inputs.
 
-## Simulator
+## One-command Simulator run
+
+This generates the project, boots the Simulator, builds Tether into the local
+ignored `build/` directory, installs the app, launches it, and opens Simulator:
+
+```sh
+./scripts/run-simulator.sh
+```
+
+This performs a data-preserving Simulator upgrade. Before installation it makes
+a temporary backup of Tether's data container; if CoreSimulator assigns a new
+container UUID, the script restores the backup before launch. The Linux rootfs,
+installed Alpine packages, Claude download, authentication, and workspace files
+therefore survive rebuilds. To deliberately delete that app data and start from
+a fresh install, use:
+
+```sh
+./scripts/run-simulator.sh --reset-data
+```
+
+The default destination is `iPhone 17 Pro`. To use another installed device:
+
+```sh
+TETHER_SIMULATOR_NAME='iPhone 16 Pro' ./scripts/run-simulator.sh
+```
+
+List available destinations with:
+
+```sh
+xcrun simctl list devices available
+```
+
+## Equivalent manual build
 
 ```sh
 xcodegen generate
-xcodebuild -project Tether.xcodeproj -scheme Tether \
+xcrun simctl boot 'iPhone 17 Pro' 2>/dev/null || true
+xcrun simctl bootstatus 'iPhone 17 Pro' -b
+
+xcodebuild \
+  -project Tether.xcodeproj \
+  -scheme Tether \
   -configuration Debug \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -skipPackagePluginValidation -skipMacroValidation \
-  CODE_SIGNING_ALLOWED=NO build
+  -derivedDataPath "$PWD/build/ios-simulator/DerivedData" \
+  -skipPackagePluginValidation \
+  -skipMacroValidation \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+
+xcrun simctl install 'iPhone 17 Pro' \
+  "$PWD/build/ios-simulator/DerivedData/Build/Products/Debug-iphonesimulator/Tether.app"
+xcrun simctl launch 'iPhone 17 Pro' com.tether.app
+open -a Simulator
 ```
 
-Boot the named simulator, install the built `Tether.app`, and launch
-`com.tether.app`. `xcrun simctl get_app_container` locates the current sandbox;
-do not persist an old application-container UUID.
+## Remove Tether build caches
 
-Useful DEBUG launch variables use the `TETHER_` prefix:
+This removes this repository's `.build`/`.swiftpm` directories, its local
+`build/` output, `Frameworks/.build`, and only Xcode DerivedData directories
+whose names begin with `Tether-`:
 
-- `TETHER_AUTOWORKSPACE=1`
-- `TETHER_AUTOCOMMANDS='command1\ncommand2\n'`
-- `TETHER_AUTOCOMMAND_FILE=/absolute/path/to/commands.sh`
-- `TETHER_PTY_LOG=/absolute/path/to/output.log`
-- `TETHER_HOST_SHELL=1` selects the host shell for debugging; Alpine is the
-  default product path.
+```sh
+./scripts/clean-builds.sh
+```
 
-The app still reads the corresponding legacy `TERMX_` variables so existing
-automation is not broken, but new automation should use `TETHER_`.
+Also uninstall Tether and its data from the currently booted Simulator:
+
+```sh
+./scripts/clean-builds.sh --simulator
+```
+
+The cleanup does not delete shared Xcode caches, other Simulator apps/devices,
+the source tree, or the required xcframeworks. `Frameworks/.build` contains the
+rebuildable host Blink output; rerun `Frameworks/build-blink.sh` before host
+Linux/network acceptance after cleaning.
+
+## Validation gates
+
+```sh
+./scripts/validate.sh --quick    # Swift, JS and native component suites
+./scripts/validate.sh --network  # real Blink/Alpine download and apk tests
+./scripts/validate.sh --ios      # regenerate and compile the Simulator app
+./scripts/validate.sh --all      # all gates
+```
+
+`--network` downloads an Alpine minirootfs and packages. `--ios` uses temporary
+DerivedData and removes it when the gate exits; use `run-simulator.sh` when you
+want the built app retained for installation.
 
 ## Linux smoke sequence
 
-Run these in one Tether terminal session:
+Run inside one Tether terminal session:
 
 ```sh
 uname -a
@@ -66,18 +128,32 @@ xdg-open https://example.com
 node -e 'console.log(6 * 7)'
 ```
 
-The expected behavior is standard Linux behavior: `apk` installs real Alpine
-packages, pipelines and signals stay inside the guest, and only manifest-listed
-runtime launchers plus desktop opener commands cross to host services.
+These are real Alpine packages and guest commands. Only manifest-declared
+platform runtimes and desktop opener capabilities cross into app services.
 
-For an arbitrary WASI module copied into the selected workspace:
+Run an arbitrary WASI module from the selected workspace with:
 
 ```sh
 wasm module.wasm arg1 arg2
 ```
 
+## Debug launch variables
+
+- `TETHER_UI_TEST_MODE=1` is required before any automation-only workspace or
+  command variable below is honored
+- `TETHER_AUTOWORKSPACE=1`
+- `TETHER_AUTOCOMMANDS='command1\ncommand2\n'`
+- `TETHER_AUTOCOMMAND_FILE=/absolute/path/to/commands.sh`
+- `TETHER_PTY_LOG=1` mirrors debug PTY bytes to the app-owned
+  `Documents/.tether-pty.log`
+- `TETHER_HOST_SHELL=1` selects the host shell; Alpine is the product default
+
+Legacy `TERMX_` aliases remain readable for existing automation, but new usage
+should use `TETHER_`.
+
 ## Physical device
 
-Use a development signing team, select an iPhone/iPad destination, and build the
-same `Tether` scheme. Complete [docs/DEVICE-PASS.md](docs/DEVICE-PASS.md) before
-release; account-backed OAuth cannot be certified by simulator-only automation.
+Set a development signing team, select the iPhone/iPad destination, and build
+the same `Tether` scheme. Complete [docs/DEVICE-PASS.md](docs/DEVICE-PASS.md)
+before release; signed-device and account OAuth results cannot be inferred from
+a Simulator build.

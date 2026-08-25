@@ -5,6 +5,7 @@ protocol LinuxRuntime: AnyObject {
     func prepare(rootfs: URL, mapper: LinuxPathMapper) throws
     func run(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool, shouldInterrupt: @escaping () -> Bool) async -> Int32
     func interrupt()
+    func terminate()
 }
 
 enum LinuxRuntimeFactory {
@@ -110,6 +111,10 @@ final class EmbeddedBlinkRuntime: LinuxRuntime {
 
     func interrupt() {
         termx_blink_interrupt()
+    }
+
+    func terminate() {
+        termx_blink_terminate()
     }
 }
 
@@ -218,6 +223,13 @@ final class HostBlinkRuntime: LinuxRuntime, @unchecked Sendable {
         let runningProcess = process
         processLock.unlock()
         runningProcess?.interrupt()
+    }
+
+    func terminate() {
+        processLock.lock()
+        let runningProcess = process
+        processLock.unlock()
+        runningProcess?.terminate()
     }
 
     private static func forward(_ source: FileHandle, to targetFD: Int32) {

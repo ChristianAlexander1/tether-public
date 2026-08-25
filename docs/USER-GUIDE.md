@@ -4,6 +4,26 @@
 
 Choose a folder with **Add Folder**. Tether stores the security-scoped bookmark
 and mounts that folder at `/work` inside Alpine. Shell commands start there.
+`/work` is the real Linux-visible path; Simulator-only paths such as
+`/Users/.../CoreSimulator/.../Documents` are host implementation details and do
+not exist on an iPhone.
+
+On an iPhone or Simulator, the folder chosen in the Files picker is the user's
+workspace and remains visible at that same Files location. **On My iPhone →
+Tether** (when shown by Files) is Tether's app-owned storage, not the selected
+workspace. It contains Linux and global-tool data and should be managed with
+Tether's Storage screen. If that app-owned folder is removed manually, Tether
+validates each runtime on its next use and downloads only the missing runtime
+files again.
+
+An empty workspace is not automatically a Git repository. Create or obtain one
+the same way you would on any Linux machine:
+
+```sh
+cd /work
+git init my-project
+# or: git clone https://example.com/owner/repository.git
+```
 
 ## Linux packages
 
@@ -62,6 +82,12 @@ These open in Tether’s in-app Safari presentation. A server bound to Alpine
 loopback is not the Mac Simulator host’s loopback; test it with `curl` inside
 the terminal.
 
+Tether does not open `example.com` or any other website at startup. A browser
+appears only after a program runs an opener such as `xdg-open`, including an
+OAuth login request. Diagnostic logs record the command-generated request; they
+do not trigger it. Simulator automation commands are accepted only when the
+explicit UI-test mode flag is also present.
+
 ## Shell behavior
 
 Pipelines, redirections, background jobs and Ctrl-C are handled by Alpine and
@@ -84,5 +110,11 @@ you would on another Linux machine.
 - deleting the app removes its private runtime storage but not an external
   workspace owned by Files/iCloud.
 
+If a selected workspace is deleted, moved somewhere its security bookmark
+cannot follow, or loses permission, Tether returns to folder selection instead
+of starting a shell on a dead path. Re-select the moved folder with Add Folder.
+
 Use the Storage UI for destructive cleanup so the target and reclaimed size are
-visible before deletion.
+visible before deletion. Managed tools are listed separately: Claude Code can
+be uninstalled without removing unrelated global npm packages or workspace
+files. Running `claude` later performs a normal fresh installation.

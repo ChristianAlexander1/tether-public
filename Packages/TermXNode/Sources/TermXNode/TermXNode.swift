@@ -173,10 +173,6 @@ public final class EmbeddedNodeService: NodeService, @unchecked Sendable {
                     return self?.interrupted ?? false
                 }
                 self.currentJob = nil
-                if interactive {
-                    // Belt-and-suspenders: clear any stuck ora spinner line on the PTY.
-                    Self.writeFD(stderrFD, "\u{1B}[?25h\u{1B}[2K\r")
-                }
                 continuation.resume(returning: code)
             }
         }

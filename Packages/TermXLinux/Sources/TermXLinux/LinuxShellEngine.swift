@@ -46,7 +46,11 @@ public final class LinuxShellEngine: TerminalEngine {
             lock.lock()
             interruptedPIDs.insert(pid)
             lock.unlock()
-            linux.interrupt()
+            if sig == SIGTERM {
+                linux.terminate()
+            } else {
+                linux.interrupt()
+            }
         }
     }
 
@@ -58,8 +62,9 @@ public final class LinuxShellEngine: TerminalEngine {
             text.withCString { ptr in _ = Darwin.write(pty, ptr, strlen(ptr)) }
         }
 
-        write("Tether Linux (Alpine / Blink) — your workspace is /work\n")
-        write("Like a container shell: apk add git … then use them here.\n")
+        write("Tether Linux (Alpine / Blink)\n")
+        write("/work is your selected iOS Files workspace; shell commands start there.\n")
+        write("Install packages with apk add; start a project with git clone or git init.\n")
         write("Bootstrapping if needed…\n")
 
         let sem = DispatchSemaphore(value: 0)

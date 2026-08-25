@@ -6,6 +6,7 @@ final class TerminalTypingTests: XCTestCase {
     func testShellExecutesTypedCommands() {
         let app = XCUIApplication()
         // Real user mode: open a workspace, no AUTOCOMMAND harness — type like a person.
+        app.launchEnvironment["TETHER_UI_TEST_MODE"] = "1"
         app.launchEnvironment["TETHER_AUTOWORKSPACE"] = "1"
         app.launch()
         sleep(8) // allow Alpine bootstrap + login banner

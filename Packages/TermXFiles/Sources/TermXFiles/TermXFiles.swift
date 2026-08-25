@@ -61,6 +61,7 @@ public final class WorkspaceStore: NSObject, WorkspaceProviding {
     private let defaults: UserDefaults
     private let key = "termx.workspace.bookmarks"
     private var records: [UUID: BookmarkRecord] = [:]
+    private var transientRecordIDs: Set<UUID> = []
     private var activeCounts: [UUID: Int] = [:]
     private var realPaths: [UUID: String] = [:]
     private let lock = NSLock()
@@ -148,6 +149,16 @@ public final class WorkspaceStore: NSObject, WorkspaceProviding {
 
         guard url.startAccessingSecurityScopedResource() else {
             throw WorkspaceError.accessDenied
+        }
+
+        // Existence must be checked after opening the security scope. Checking
+        // an external Files/iCloud URL first can look like a missing folder even
+        // when the bookmark is valid but the sandbox has not granted access yet.
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            url.stopAccessingSecurityScopedResource()
+            throw WorkspaceError.missingBookmark
         }
 
         // Refresh stale bookmark
@@ -247,6 +258,7 @@ public final class WorkspaceStore: NSObject, WorkspaceProviding {
 
         lock.lock()
         records.removeValue(forKey: w.id)
+        transientRecordIDs.remove(w.id)
         activeCounts.removeValue(forKey: w.id)
         realPaths.removeValue(forKey: w.id)
         lock.unlock()
@@ -348,7 +360,11 @@ public final class WorkspaceStore: NSObject, WorkspaceProviding {
 
     /// Registers a workspace backed by a normal directory for unit tests and
     /// DEBUG-only simulator automation (never used for user folders in release).
-    public func registerLocalWorkspaceForTesting(_ workspace: Workspace, rootURL: URL) throws {
+    public func registerLocalWorkspaceForTesting(
+        _ workspace: Workspace,
+        rootURL: URL,
+        persisted: Bool = true
+    ) throws {
         let data = try rootURL.bookmarkData(
             options: .minimalBookmark,
             includingResourceValuesForKeys: nil,
@@ -356,6 +372,43 @@ public final class WorkspaceStore: NSObject, WorkspaceProviding {
         )
         lock.lock()
         records[workspace.id] = BookmarkRecord(workspace: workspace, data: data)
+        if persisted {
+            transientRecordIDs.remove(workspace.id)
+        } else {
+            transientRecordIDs.insert(workspace.id)
+        }
+        lock.unlock()
+        persist()
+    }
+
+    /// Removes DEBUG/test registrations that point at the app's own local
+    /// Documents directory. A real external folder with the same display name
+    /// is preserved because the resolved bookmark target must match exactly.
+    public func removeLocalWorkspaceRegistrations(rootURL: URL) {
+        let target = rootURL.standardizedFileURL.path
+        lock.lock()
+        let snapshot = records
+        lock.unlock()
+
+        let matchingIDs = snapshot.compactMap { id, record -> UUID? in
+            var stale = false
+            guard let url = try? URL(
+                resolvingBookmarkData: record.data,
+                options: [],
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            ), url.standardizedFileURL.path == target else { return nil }
+            return id
+        }
+        guard !matchingIDs.isEmpty else { return }
+
+        lock.lock()
+        for id in matchingIDs {
+            records.removeValue(forKey: id)
+            transientRecordIDs.remove(id)
+            activeCounts.removeValue(forKey: id)
+            realPaths.removeValue(forKey: id)
+        }
         lock.unlock()
         persist()
     }
@@ -380,12 +433,22 @@ public final class WorkspaceStore: NSObject, WorkspaceProviding {
         lock.unlock()
 
         var stale = false
-        let url = try URL(
-            resolvingBookmarkData: record.data,
-            options: [],
-            relativeTo: nil,
-            bookmarkDataIsStale: &stale
-        )
+        let url: URL
+        do {
+            url = try URL(
+                resolvingBookmarkData: record.data,
+                options: [],
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            )
+        } catch {
+            throw WorkspaceError.missingBookmark
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            throw WorkspaceError.missingBookmark
+        }
 
         lock.lock()
         activeCounts[w.id, default: 0] += 1
@@ -406,7 +469,9 @@ public final class WorkspaceStore: NSObject, WorkspaceProviding {
 
     private func persist() {
         lock.lock()
-        let values = Array(records.values)
+        let values = records.compactMap { id, record in
+            transientRecordIDs.contains(id) ? nil : record
+        }
         lock.unlock()
         if let data = try? JSONEncoder().encode(values) {
             defaults.set(data, forKey: key)

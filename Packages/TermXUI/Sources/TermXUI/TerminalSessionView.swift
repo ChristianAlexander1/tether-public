@@ -104,7 +104,7 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         view.linkReporting = .implicit
         view.clipsToBounds = true
         theme.apply(to: view, palette: palette, font: font, fontSize: fontSize)
-        context.coordinator.attach(to: view)
+        context.coordinator.attach(to: view, isDark: theme.isDark)
         return view
     }
 
@@ -114,6 +114,7 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         context.coordinator.ctrlIsSticky = ctrlIsSticky
         view.controlModifier = ctrlIsSticky
         theme.apply(to: view, palette: palette, font: font, fontSize: fontSize)
+        context.coordinator.updateColorScheme(isDark: theme.isDark)
     }
 
     static func dismantleUIView(_ uiView: TerminalView, coordinator: Coordinator) {
@@ -127,13 +128,21 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
 
         init(session: TerminalSession) { self.session = session }
 
-        func attach(to view: TerminalView) {
-            let pump = TerminalOutputPump(terminalView: view)
+        func attach(to view: TerminalView, isDark: Bool) {
+            let pump = TerminalOutputPump(
+                terminalView: view,
+                isDark: isDark,
+                sendReply: { [weak self] data in self?.session.send(data) }
+            )
             pump.start()
             outputPump = pump
             session.attachOutputHandler { [weak pump] data in
                 pump?.enqueue(data)
             }
+        }
+
+        func updateColorScheme(isDark: Bool) {
+            outputPump?.updateColorScheme(isDark: isDark)
         }
 
         func detach() {

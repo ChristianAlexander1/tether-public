@@ -40,25 +40,66 @@ class TermxExit extends Error {
   }
 }
 
-process.reallyExit = function trappedReallyExit(code) {
-  finishScript(Number(code ?? 0) | 0);
-};
-process.exit = function trappedExit(code) {
-  throw new TermxExit(code);
-};
-
 let scriptFinish = null;
+let ownsExitCapture = false;
+
+function clearExitCapture() {
+  if (!ownsExitCapture) return;
+  ownsExitCapture = false;
+  try { process.setUncaughtExceptionCaptureCallback(null); } catch (_) { /* ignore */ }
+}
+
+function captureInternalExit(error) {
+  clearExitCapture();
+  if (error instanceof TermxExit) {
+    finishScript(error.termxExitCode);
+    return;
+  }
+  const message = sanitizeHostPaths(String(error && error.stack ? error.stack : error));
+  try { process.stderr.write(message + '\n'); } catch (_) { /* ignore */ }
+  finishScript(1);
+}
+
+// A first call must unwind the CLI immediately, just like real process.exit.
+// Once the bootstrap has completed that job, later calls from catch-all exit
+// handlers are already satisfied and return instead of recursively throwing.
+function trappedExit(code) {
+  const status = Number(code ?? process.exitCode ?? 0) | 0;
+  process.exitCode = status;
+  if (!scriptFinish) return;
+  try {
+    if (typeof process.setUncaughtExceptionCaptureCallback === 'function' &&
+        !(typeof process.hasUncaughtExceptionCaptureCallback === 'function' &&
+          process.hasUncaughtExceptionCaptureCallback())) {
+      process.setUncaughtExceptionCaptureCallback(captureInternalExit);
+      ownsExitCapture = true;
+    }
+  } catch (_) { /* fall back to the bootstrap uncaughtException listener */ }
+  throw new TermxExit(status);
+}
+process.reallyExit = trappedExit;
+process.exit = trappedExit;
+
 /** Set after intake socket is created — passed to lifecycle teardown. */
 let intakeSocket = null;
 /** Abort hook for the currently running job (cancel from Swift). */
 let abortRunningJob = null;
+/** `exit` must fire once per job even though the parent engine remains alive. */
+let jobExitEmitted = false;
+
+function emitJobExit(code) {
+  if (jobExitEmitted) return;
+  jobExitEmitted = true;
+  const status = Number(code ?? process.exitCode ?? 0) | 0;
+  process.exitCode = status;
+  try { process.emit('exit', status); } catch (_) { /* exit is already committed */ }
+}
 
 function finishScript(code) {
   if (!scriptFinish) return;
   const f = scriptFinish;
   scriptFinish = null;
-  lifecycle.silenceEventLoopStorm();
-  try { ipc.clearTransport(); } catch (_) { /* ignore */ }
+  clearExitCapture();
   f(code);
 }
 
@@ -93,9 +134,7 @@ async function runJob(job, onDone) {
   const reply = (obj) => {
     if (replied) return;
     replied = true;
-    // Reply BEFORE teardown — finishJob closes leftover handles and can
-    // destroy the job-reply pipe FD, which left Claude/npm failures hanging
-    // the host forever (no exit code → shell stuck).
+    emitJobExit(obj && obj.exitCode);
     try { process.chdir(prevCwd); } catch (_) { /* ignore */ }
     writeReply(obj);
     try { lifecycle.finishJob(intakeSocket, ipc); } catch (_) { /* ignore */ }
@@ -104,25 +143,22 @@ async function runJob(job, onDone) {
 
   abortRunningJob = () => {
     if (replied) return;
-    if (scriptFinish) {
-      finishScript(130);
-    } else {
-      reply({ exitCode: 130 });
-    }
+    if (scriptFinish) finishScript(130);
+    else reply({ exitCode: 130 });
   };
 
   try {
+    lifecycle.beginJob();
+    jobExitEmitted = false;
     if (job.cwd) process.chdir(job.cwd);
     if (job.env) {
-      for (const [k, v] of Object.entries(job.env)) process.env[k] = v;
+      for (const [key, value] of Object.entries(job.env)) process.env[key] = value;
     }
     process.env.TETHER_INTERACTIVE = job.interactive ? '1' : '0';
     process.env.TERMX_INTERACTIVE = job.interactive ? '1' : '0';
 
     lifecycle.bindStdinFromJob(job);
-    if (job.interactive) {
-      lifecycle.enableLiveOutput();
-    }
+    if (job.interactive) lifecycle.enableLiveOutput();
 
     if (process.env.TETHER_IPC_SOCK || process.env.TERMX_IPC_SOCKET) {
       await ipc.connect();
@@ -165,26 +201,26 @@ async function runJob(job, onDone) {
       evalModule.filename = evalFilename;
       evalModule.paths = Module._nodeModulePaths(process.cwd());
       const requireFromCwd = evalModule.require.bind(evalModule);
-
       process.exitCode = 0;
-      scriptFinish = (code) => {
+      scriptFinish = code => {
         process.removeListener('beforeExit', onBeforeExit);
         reply({ exitCode: Number(code ?? 0) | 0 });
       };
       const onBeforeExit = () => finishScript(process.exitCode ?? 0);
       process.on('beforeExit', onBeforeExit);
-
       // eslint-disable-next-line no-eval
       const value = (function (require) { return eval(source); })(requireFromCwd);
-      if (job.kind === 'print' && value !== undefined) {
-        const text = typeof value === 'string' ? value : require('util').inspect(value);
+      const resolved = value && typeof value.then === 'function' ? await value : value;
+      if (job.kind === 'print' && resolved !== undefined) {
+        const text = typeof resolved === 'string' ? resolved : require('util').inspect(resolved);
         process.stdout.write(text + '\n');
       }
       return;
     }
 
     if (job.kind === 'module') {
-      require(job.module);
+      const value = require(job.module);
+      if (value && typeof value.then === 'function') await value;
       reply({ exitCode: 0 });
       return;
     }
@@ -192,8 +228,7 @@ async function runJob(job, onDone) {
     const argv = Array.isArray(job.argv) ? job.argv.slice() : [];
     process.argv = argv;
     process.exitCode = 0;
-
-    scriptFinish = (code) => {
+    scriptFinish = code => {
       process.removeListener('beforeExit', onBeforeExit);
       reply({ exitCode: Number(code ?? 0) | 0 });
     };
@@ -201,24 +236,20 @@ async function runJob(job, onDone) {
     process.on('beforeExit', onBeforeExit);
 
     const entry = argv[1];
-    if (!entry) {
-      throw new Error('node: script path is missing');
-    }
+    if (!entry) throw new Error('node: script path is missing');
     const path = require('path');
     const resolvedEntry = path.isAbsolute(entry) ? entry : path.resolve(process.cwd(), entry);
     if (resolvedEntry.endsWith('.mjs')) {
       await import(require('url').pathToFileURL(resolvedEntry).href);
     } else {
       delete require.cache[require.resolve(resolvedEntry)];
-      require(resolvedEntry);
+      const value = require(resolvedEntry);
+      if (value && typeof value.then === 'function') await value;
     }
   } catch (err) {
     if (err instanceof TermxExit) {
-      if (scriptFinish) {
-        finishScript(err.termxExitCode);
-      } else {
-        reply({ exitCode: err.termxExitCode });
-      }
+      if (scriptFinish) finishScript(err.termxExitCode);
+      else reply({ exitCode: err.termxExitCode });
       return;
     }
     scriptFinish = null;

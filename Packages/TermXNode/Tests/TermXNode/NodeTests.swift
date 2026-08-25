@@ -44,8 +44,22 @@ final class NodeTests: XCTestCase {
                        "a persistent engine must not re-enter Node's one-shot runMain bootstrap")
         XCTAssertTrue(bootstrap.contains("path.resolve(process.cwd(), entry)"),
                       "file-based node jobs must resolve relative to the workspace")
-        XCTAssertTrue(bootstrap.contains("delete require.cache[require.resolve(resolvedEntry)]"),
-                      "a CLI entry point must execute again in the persistent engine")
+        XCTAssertTrue(bootstrap.contains("if (!scriptFinish) return"),
+                      "a completed job must absorb repeated process.exit calls")
+        XCTAssertTrue(bootstrap.contains("throw new TermxExit(status)"),
+                      "the first process.exit call must immediately unwind the CLI")
+        XCTAssertTrue(bootstrap.contains("setUncaughtExceptionCaptureCallback(captureInternalExit)"),
+                      "the internal exit sentinel must not leak into CLI exception handlers")
+
+        let lifecycle = try String(contentsOf: shimRoot.appendingPathComponent("lib/job_lifecycle.js"))
+        XCTAssertFalse(lifecycle.contains("activePrivateModes"),
+                       "the Node host must not synthesize application terminal cleanup")
+        XCTAssertFalse(lifecycle.contains("restoreInteractiveTerminal"),
+                       "screen lifecycle belongs to the CLI and terminal, not a command shim")
+        XCTAssertTrue(lifecycle.contains("\n  teardownJob(keepRef);"),
+                      "persistent jobs must release handles before the next command")
+        XCTAssertTrue(bootstrap.contains("process.emit('exit', status)"),
+                      "persistent jobs must run normal Node exit handlers")
     }
 
     func testRegistryJSONLoads() throws {
