@@ -192,6 +192,25 @@ public final class WorkspaceStore: NSObject, WorkspaceProviding {
 #endif
     }
 
+    /// Whether the folder behind an *already accessed* workspace still exists
+    /// and is reachable.
+    ///
+    /// A security-scoped bookmark can go stale while the app is suspended —
+    /// the user deletes the folder in Files, or iCloud evicts it. Checking the
+    /// resolved path is what lets the session report "workspace unavailable"
+    /// instead of failing later with an unexplained I/O error.
+    public func isStillAvailable(_ w: Workspace) -> Bool {
+        lock.lock()
+        let path = realPaths[w.id]
+        lock.unlock()
+        guard let path else { return false }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
+            return false
+        }
+        return isDirectory.boolValue
+    }
+
     // MARK: - Frozen API: endAccess
 
     public func endAccess(_ w: Workspace) {

@@ -5,6 +5,7 @@ import Foundation
 final class HostNodeRuntime: NodeRuntime {
     private let spawnExecutor: SpawnExecuting
     private var currentProcess: Process?
+    private var activeIPCServer: NodeJobIPCServer?
     private let lock = NSLock()
 
     init(spawnExecutor: SpawnExecuting) {
@@ -15,30 +16,66 @@ final class HostNodeRuntime: NodeRuntime {
         guard let nodePath = Self.resolveNodeBinary() else { return 127 }
         guard let shimPreload = NodeShim.preloadPath else { return 127 }
 
-        let bridge = NodeSpawnBridge(executor: spawnExecutor)
-        guard let server = NodeSocketServer(directory: job.cwd) else { return 1 }
-        server.start(
-            bridge: bridge,
-            stdinFD: job.stdinFD, stdoutFD: job.stdoutFD, stderrFD: job.stderrFD,
-            cwd: job.cwd, env: job.env, interactive: job.interactive
-        )
-        defer { server.stop() }
+        var env = job.env
+        var ipcV2Server: NodeJobIPCServer?
+        var legacyServer: NodeSocketServer?
+
+        if NodeShim.useIPCv2 {
+            // Same lane split as NodeMobileRuntime: the v2 shim preload speaks
+            // TJIP/2 frames, so it must be paired with the TJIP/2 server — the
+            // v1 newline-JSON server would fail its handshake byte-for-byte.
+            let stdio = NodeJobStdio(
+                stdinFD: job.stdinFD,
+                stdoutFD: job.stdoutFD,
+                stderrFD: job.stderrFD,
+                stdinBound: job.interactive && job.stdinFD >= 0 && isatty(job.stdinFD) != 0
+            )
+            guard let server = NodeJobIPCServer(executor: spawnExecutor) else { return 1 }
+            server.start(stdio: stdio, cwd: job.cwd, env: job.env)
+            ipcV2Server = server
+            env["TETHER_IPC_SOCK"] = server.path
+            env["TERMX_IPC_SOCKET"] = server.path
+            env.removeValue(forKey: "TETHER_INTERACTIVE")
+            env.removeValue(forKey: "TERMX_INTERACTIVE")
+        } else {
+            let bridge = NodeSpawnBridge(executor: spawnExecutor)
+            guard let server = NodeSocketServer(directory: job.cwd) else { return 1 }
+            server.start(
+                bridge: bridge,
+                stdinFD: job.stdinFD, stdoutFD: job.stdoutFD, stderrFD: job.stderrFD,
+                cwd: job.cwd, env: job.env, interactive: job.interactive
+            )
+            legacyServer = server
+            env["TETHER_IPC_SOCK"] = server.path
+            env["TERMX_IPC_SOCKET"] = server.path
+            env["TETHER_INTERACTIVE"] = job.interactive ? "1" : "0"
+            env["TERMX_INTERACTIVE"] = job.interactive ? "1" : "0"
+        }
+
+        lock.lock()
+        activeIPCServer = ipcV2Server
+        lock.unlock()
+        defer {
+            lock.lock()
+            activeIPCServer = nil
+            lock.unlock()
+            ipcV2Server?.stop()
+            legacyServer?.stop()
+        }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: nodePath)
         process.currentDirectoryURL = URL(fileURLWithPath: job.cwd)
 
-        var env = job.env
-        env["TETHER_IPC_SOCK"] = server.path
-        env["TERMX_IPC_SOCKET"] = server.path
-        env["TETHER_INTERACTIVE"] = job.interactive ? "1" : "0"
-        env["TERMX_INTERACTIVE"] = job.interactive ? "1" : "0"
         var nodeOptionsParts: [String] = []
-        if let ensureIpc = NodeShim.ensureIpcPath {
+        // ensure-ipc belongs to the v1 lane (its module also self-gates on
+        // TETHER_IPC_V2, so the guest engine stays correct either way).
+        if !NodeShim.useIPCv2, let ensureIpc = NodeShim.ensureIpcPath {
             nodeOptionsParts.append("--import \(ensureIpc)")
         }
         nodeOptionsParts.append("--require \(shimPreload)")
         env["NODE_OPTIONS"] = nodeOptionsParts.joined(separator: " ")
+        env["TETHER_IPC_V2"] = NodeShim.useIPCv2 ? "1" : "0"
         process.environment = env
 
         if let cmd = job.argv.first {
@@ -143,6 +180,29 @@ final class HostNodeRuntime: NodeRuntime {
 
     func requestCancel() {
         interrupt()
+    }
+
+    /// v2: push the geometry through TJIP/2 (the child runs on PTY-less pipes,
+    /// so the OS will not deliver SIGWINCH to it). v1 relied on polling.
+    func resize(cols: Int, rows: Int) {
+        lock.lock()
+        let server = activeIPCServer
+        lock.unlock()
+        server?.pushResize(cols: cols, rows: rows)
+    }
+
+    /// v2: a real signal event through TJIP/2 so the program runs its own
+    /// teardown. Without a v2 session, fall back to a POSIX SIGINT.
+    func signalActiveJob(_ name: String) {
+        lock.lock()
+        let server = activeIPCServer
+        let process = currentProcess
+        lock.unlock()
+        if let server {
+            server.pushSignal(name)
+        } else if name == "SIGINT" {
+            process?.interrupt()
+        }
     }
 
     private static func which(_ name: String) -> String? {

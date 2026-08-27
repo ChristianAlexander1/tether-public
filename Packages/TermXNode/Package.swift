@@ -10,6 +10,8 @@ let package = Package(
     dependencies: [
         .package(path: "../TermXCore"),
         .package(path: "../TermXFiles"),
+        .package(path: "../../External/TetherJobIPC"),
+        .package(path: "../../External/TetherJobControl"),
     ],
     targets: [
         .binaryTarget(
@@ -30,6 +32,8 @@ let package = Package(
             dependencies: [
                 "TermXCore",
                 "TermXFiles",
+                .product(name: "TetherJobIPC", package: "TetherJobIPC"),
+                .product(name: "TetherJobControl", package: "TetherJobControl"),
                 .target(name: "NodeMobileBridge", condition: .when(platforms: [.iOS])),
             ],
             resources: [
@@ -39,7 +43,12 @@ let package = Package(
         ),
         .testTarget(
             name: "TermXNodeTests",
-            dependencies: ["TermXNode", "TermXFiles"]
+            dependencies: [
+                "TermXNode",
+                "TermXFiles",
+                .product(name: "TetherJobIPC", package: "TetherJobIPC"),
+            ],
+            path: "Tests/TermXNode"
         ),
     ]
 )

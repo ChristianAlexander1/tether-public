@@ -1,24 +1,26 @@
 'use strict'
 // Bun API polyfill so Claude Code's extracted JS bundle runs under Node.
-// Technique adapted from the Apache-2.0 QNX Claude Code port (qnx/claude-code-qnx).
-// TermX changes: TermX-oriented naming; YAML optional.
+//
+// The Bun surface itself lives in `tether-bun-compat` (External/, with its own
+// test suite); this file is only the glue that is specific to running Claude
+// Code here:
+//
+//   * YAML, which maps to the js-yaml the installer puts in place;
+//   * semver ordering and the ANSI width/wrap helpers, which the bundle uses
+//     and the compat library does not provide;
+//   * `openInBrowser`, which goes through the platform opener.
+//
+// What is deliberately NOT here any more: a hardcoded list of opener names
+// that `Bun.which` answered with a fabricated `/usr/bin/<name>` path. It
+// reported success for launchers that were never installed and only ever knew
+// the names someone had typed into this file. `Bun.which` now performs a real
+// PATH scan (the guest launchers are on PATH), and the one list of opener
+// names lives in `tether_dispatch_manifest.json`.
 
 const cp = require('child_process')
+const path = require('path')
 
-const FNV_PRIME = 1099511628211n
-const FNV_OFFSET = 14695981039346656037n
-
-function fnv1a64(input, seed = FNV_OFFSET) {
-  let hash = BigInt.asUintN(64, seed)
-  const buf = typeof input === 'string'
-    ? Buffer.from(input, 'utf8')
-    : Buffer.isBuffer(input) ? input : Buffer.from(String(input))
-  for (const byte of buf) {
-    hash = BigInt.asUintN(64, hash ^ BigInt(byte))
-    hash = BigInt.asUintN(64, hash * FNV_PRIME)
-  }
-  return hash
-}
+const { installBunGlobal } = require('./bun-compat/lib/index.js')
 
 function semverParts(v) {
   const m = String(v).match(/^(\d+)\.(\d+)\.(\d+)(-(.+))?/)
@@ -111,62 +113,25 @@ function bunWrapAnsi(str, cols) {
 let jsYaml
 try { jsYaml = require('js-yaml') } catch {}
 
-function bunSpawn(cmd, opts = {}) {
-  const { stdin = 'ignore', stdout = 'inherit', stderr = 'inherit',
-          cwd, env, argv0, detached = false } = opts
-  const mapStdio = s => (s === 'pipe' ? 'pipe' : s === 'ignore' ? 'ignore' : 'inherit')
-  const proc = cp.spawn(cmd[0], cmd.slice(1), {
-    cwd, env: env ?? process.env, argv0,
-    detached,
-    stdio: [mapStdio(stdin), mapStdio(stdout), mapStdio(stderr)],
-  })
-  if (proc.stdout) {
-    proc.stdout.text = () => new Promise((res, rej) => {
-      const chunks = []
-      proc.stdout.on('data', c => chunks.push(c))
-      proc.stdout.on('end', () => res(Buffer.concat(chunks).toString('utf8')))
-      proc.stdout.on('error', rej)
-    })
-  }
-  if (detached) proc.unref()
-  const exited = new Promise((res, rej) => {
-    proc.on('close', (code, sig) => res(sig != null ? 128 : (code ?? 1)))
-    proc.on('error', rej)
-  })
-  return {
-    get pid() { return proc.pid },
-    get exitCode() { return proc.exitCode },
-    get signalCode() { return proc.signalCode },
-    get killed() { return proc.killed },
-    stdin: proc.stdin,
-    stdout: proc.stdout,
-    stderr: proc.stderr,
-    exited,
-    kill(signal) { proc.kill(signal) },
-  }
+// `child_process` here is the shim'd module: on the TJIP/2 lane `require`
+// returns tether-shim-v2's implementation, so Bun.spawn goes over the protocol
+// like every other child process rather than around it.
+const Bun = installBunGlobal({
+  force: true,
+  version: '1.3.14-tether-shim',
+  spawnImpl: cp,
+  fs: require('fs'),
+  env: process.env,
+  pathDirs: (process.env.PATH || '').split(path.delimiter).filter(Boolean),
+})
+
+/// The platform opener, named by the host from the dispatch manifest. No
+/// opener name is written in this file.
+function platformOpener() {
+  return process.env.TETHER_OPENER || process.env.BROWSER || null
 }
 
-global.Bun = {
-  version: '1.3.14-termx-shim',
-  hash(input, seed) {
-    const s = seed !== undefined ? BigInt.asUintN(64, BigInt(seed)) : FNV_OFFSET
-    return fnv1a64(input, s)
-  },
-  which(cmd) {
-    const openers = new Set([
-      'open', 'xdg-open', 'gnome-open', 'kde-open', 'sensible-browser', 'wslview',
-      'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
-    ])
-    if (openers.has(cmd)) {
-      return '/usr/bin/' + cmd
-    }
-    try {
-      const r = cp.spawnSync('which', [cmd], {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
-      })
-      return r.status === 0 ? (r.stdout.trim().split('\n')[0] || null) : null
-    } catch { return null }
-  },
+Object.assign(Bun, {
   semver: {
     order: semverOrder,
     satisfies() { return true },
@@ -174,27 +139,30 @@ global.Bun = {
   YAML: {
     parse(s) {
       if (jsYaml) return jsYaml.load(s)
-      throw new Error('[termx bun-shim] YAML.parse needs js-yaml')
+      throw new Error('[tether bun-shim] YAML.parse needs js-yaml')
     },
     stringify(obj, _replacer, indent) {
       if (jsYaml) return jsYaml.dump(obj, { indent: indent ?? 2 })
-      throw new Error('[termx bun-shim] YAML.stringify needs js-yaml')
+      throw new Error('[tether bun-shim] YAML.stringify needs js-yaml')
     },
   },
   JSONL: { parseChunk: null },
-  spawn: bunSpawn,
   openInBrowser(url) {
     const u = String(url || '')
-    if (!u) return Promise.resolve()
-    return Promise.resolve(cp.spawnSync('open', [u]))
+    const opener = platformOpener()
+    if (!u || !opener) return Promise.resolve()
+    // Intercepted at the spawn layer by SystemOpen, which turns it into an
+    // in-app browser presentation.
+    return Promise.resolve(cp.spawnSync(opener, [u]))
   },
   wrapAnsi: bunWrapAnsi,
   stripANSI,
   stringWidth(str) { return bunStringWidth(str) },
   embeddedFiles: [],
-  gc() { if (typeof global.gc === 'function') global.gc() },
   generateHeapSnapshot() { return new ArrayBuffer(0) },
   Terminal: null,
   Transpiler: null,
   stdin: process.stdin,
-}
+})
+
+module.exports = Bun

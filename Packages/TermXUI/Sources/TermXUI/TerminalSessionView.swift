@@ -13,18 +13,12 @@ public struct TerminalSessionView: View {
     /// Temporary testing affordance — remove with the Copy log button.
     @State private var didCopyLog = false
 
-    /// Second ^C within ~2.5s — force embedded Node/Claude to exit.
-    private let onHardInterrupt: ((_ forceNodeSignal: Bool) -> Void)?
-
     public init(
         session: TerminalSession,
-        theme: Binding<TerminalTheme> = .constant(.midnight),
-        onHardInterrupt: ((_ forceNodeSignal: Bool) -> Void)? = nil
+        theme: Binding<TerminalTheme> = .constant(.midnight)
     ) {
         self.session = session
         self._theme = theme
-        self.onHardInterrupt = onHardInterrupt
-        session.onHardInterrupt = onHardInterrupt
     }
 
     public var body: some View {
@@ -113,7 +107,13 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         context.coordinator.session = session
         context.coordinator.ctrlIsSticky = ctrlIsSticky
         view.controlModifier = ctrlIsSticky
-        theme.apply(to: view, palette: palette, font: font, fontSize: fontSize)
+        context.coordinator.applyAppearanceIfNeeded(
+            to: view,
+            theme: theme,
+            palette: palette,
+            font: font,
+            fontSize: fontSize
+        )
         context.coordinator.updateColorScheme(isDark: theme.isDark)
     }
 
@@ -125,6 +125,9 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         var session: TerminalSession
         var ctrlIsSticky = false
         private var outputPump: TerminalOutputPump?
+        private var appliedTheme: TerminalTheme?
+        private var appliedFont: TerminalFont?
+        private var appliedFontSize: CGFloat = 0
 
         init(session: TerminalSession) { self.session = session }
 
@@ -139,6 +142,23 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
             session.attachOutputHandler { [weak pump] data in
                 pump?.enqueue(data)
             }
+            session.terminalRestoreProvider = { [weak pump] in
+                pump?.pendingRestoreSequence() ?? Data()
+            }
+        }
+
+        func applyAppearanceIfNeeded(
+            to view: TerminalView,
+            theme: TerminalTheme,
+            palette: TerminalPalette,
+            font: TerminalFont,
+            fontSize: CGFloat
+        ) {
+            if appliedTheme == theme, appliedFont == font, appliedFontSize == fontSize { return }
+            theme.apply(to: view, palette: palette, font: font, fontSize: fontSize)
+            appliedTheme = theme
+            appliedFont = font
+            appliedFontSize = fontSize
         }
 
         func updateColorScheme(isDark: Bool) {
@@ -146,6 +166,7 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         }
 
         func detach() {
+            session.terminalRestoreProvider = nil
             outputPump?.stop()
             outputPump = nil
         }

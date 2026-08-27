@@ -23,7 +23,7 @@ fakes.
 2. `GUEST-PLATFORM.md`
 3. `VALIDATION.md`
 4. `../STATUS-AND-REWORK.md`
-5. `LIMITATIONS.md`
+5. `ENGINEERING-TARGETS.md`
 
 The P1–P12 agent briefs and transfer folder were integration inputs, not ongoing
 product documentation. Their completed components now live under `External/`

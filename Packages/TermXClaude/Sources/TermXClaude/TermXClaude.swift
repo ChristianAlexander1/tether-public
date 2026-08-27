@@ -5,6 +5,8 @@ public protocol ClaudeNodeRunner: AnyObject {
              stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
              interactive: Bool) async -> Int32
     func interrupt(forceNodeSignal: Bool)
+    /// Terminal geometry changed; forward it to a running job.
+    func resize(cols: Int, rows: Int)
 }
 
 /// Linux guest (Blink) — used for Alpine tools (`apk`, git, …), not for Claude.
@@ -83,19 +85,32 @@ public final class ClaudeCodeService {
         return .installed
     }
 
+    /// The platform opener's command name, supplied by the host from
+    /// `GuestDispatchManifest`. No opener name is written in this package.
+    public nonisolated(unsafe) static var platformOpenerName: String?
+
     public static func launchEnvironment(base: [String: String]) -> [String: String] {
         var env = base
+        // Only meaningful on the legacy IPC lane. On TJIP/2 the handshake
+        // reports which fds are really PTY-bound, and the flag is removed
+        // from the environment before the engine starts.
         env["TETHER_INTERACTIVE"] = "1"
         env["TERMX_INTERACTIVE"] = "1"
         env["DISABLE_AUTOUPDATER"] = env["DISABLE_AUTOUPDATER"] ?? "1"
         env["DISABLE_UPDATES"] = env["DISABLE_UPDATES"] ?? "1"
-        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] =
-            env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] ?? "1"
+        // Do not force CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC — that changes
+        // Claude's own feature gates (including fullscreen / alternate screen)
+        // versus a normal Mac/Linux terminal. Callers may still set it explicitly.
         // Extracted Claude JS hardcodes platform "linux" (Bun linux tarball). Its open
         // helper skips the browser when DISPLAY/WAYLAND are unset (no_display).
         env["DISPLAY"] = env["DISPLAY"] ?? ":0"
         env["WAYLAND_DISPLAY"] = env["WAYLAND_DISPLAY"] ?? "tether"
-        env["BROWSER"] = env["BROWSER"] ?? "open"
+        // The opener name comes from the dispatch manifest, the one file that
+        // owns program-name policy. Both variables are what desktop CLIs read.
+        if let opener = platformOpenerName ?? env["BROWSER"], !opener.isEmpty {
+            env["BROWSER"] = env["BROWSER"] ?? opener
+            env["TETHER_OPENER"] = opener
+        }
         if let preload = ProcessInfo.processInfo.environment["TETHER_SHIM_PRELOAD"]
             ?? ProcessInfo.processInfo.environment["TERMX_SHIM_PRELOAD"] {
             env["NODE_OPTIONS"] = "--require \(preload)"
@@ -271,6 +286,12 @@ public final class ClaudeCodeService {
         node.interrupt(forceNodeSignal: forceNodeSignal)
     }
 
+    /// Claude runs its TUI on the shared Node engine, so a window change has to
+    /// travel the same path as any other host job.
+    public func resize(cols: Int, rows: Int) {
+        node.resize(cols: cols, rows: rows)
+    }
+
     // MARK: - Private
 
     private func remember(lane: ClaudeRuntimeLane) {
@@ -317,4 +338,6 @@ public final class ClaudeLauncher: ObservableObject {
     }
 
     public func interrupt(forceNodeSignal: Bool = false) { service.interrupt(forceNodeSignal: forceNodeSignal) }
+
+    public func resize(cols: Int, rows: Int) { service.resize(cols: cols, rows: rows) }
 }

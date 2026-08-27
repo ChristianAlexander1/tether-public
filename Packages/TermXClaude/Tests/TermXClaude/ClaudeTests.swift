@@ -12,6 +12,9 @@ private final class TestNode: ClaudeNodeRunner {
     }
 
     func interrupt(forceNodeSignal: Bool) { interrupted = true }
+
+    var resizes: [(cols: Int, rows: Int)] = []
+    func resize(cols: Int, rows: Int) { resizes.append((cols, rows)) }
 }
 
 private final class TestLinux: ClaudeLinuxRunner {
@@ -70,6 +73,7 @@ final class ClaudeTests: XCTestCase {
     }
 
     func testLaunchEnvironmentEnablesBrowserOpenOnLinuxExtract() {
+        ClaudeCodeService.platformOpenerName = "open"
         let env = ClaudeCodeService.launchEnvironment(base: [:])
         XCTAssertEqual(env["DISPLAY"], ":0")
         XCTAssertEqual(env["BROWSER"], "open")

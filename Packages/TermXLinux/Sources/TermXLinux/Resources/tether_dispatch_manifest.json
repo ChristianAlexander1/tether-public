@@ -9,10 +9,30 @@
     "wslview"
   ],
   "host_runtimes": [
-    { "match": "basename", "name": "node", "handler": "node-mobile" },
-    { "match": "basename", "name": "npm", "handler": "node-mobile" },
-    { "match": "basename", "name": "npx", "handler": "node-mobile" },
-    { "match": "basename", "name": "claude", "handler": "node-mobile" },
-    { "match": "basename", "name": "wasm", "handler": "wasm3" }
+    {
+      "match": "basename",
+      "name": "node",
+      "handler": "node-mobile"
+    },
+    {
+      "match": "basename",
+      "name": "npm",
+      "handler": "node-mobile"
+    },
+    {
+      "match": "basename",
+      "name": "npx",
+      "handler": "node-mobile"
+    },
+    {
+      "match": "basename",
+      "name": "claude",
+      "handler": "claude-code"
+    },
+    {
+      "match": "basename",
+      "name": "wasm",
+      "handler": "wasm3"
+    }
   ]
 }

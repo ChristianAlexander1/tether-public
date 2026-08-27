@@ -24,6 +24,14 @@ final class NodeMobileRuntime: NodeRuntime {
     func requestCancel() {
         hostFallback.requestCancel()
     }
+
+    func resize(cols: Int, rows: Int) {
+        hostFallback.resize(cols: cols, rows: rows)
+    }
+
+    func signalActiveJob(_ name: String) {
+        hostFallback.signalActiveJob(name)
+    }
     #else
     private let spawnExecutor: SpawnExecuting
     private let engineLock = NSLock()
@@ -31,6 +39,9 @@ final class NodeMobileRuntime: NodeRuntime {
     private var jobWriteFD: Int32 = -1
     private var jobReadFD: Int32 = -1
     private var launchArgvStorage: [String] = []
+    /// The TJIP/2 server for the job currently running, so the terminal can
+    /// push resize and signal events into it.
+    private var activeIPCServer: NodeJobIPCServer?
     private var launchCStrings: [UnsafeMutablePointer<CChar>?] = []
 
     init(spawnExecutor: SpawnExecuting) {
@@ -46,20 +57,51 @@ final class NodeMobileRuntime: NodeRuntime {
             break
         }
 
-        let bridge = NodeSpawnBridge(executor: spawnExecutor)
-        guard let server = NodeSocketServer(directory: job.cwd) else { return 1 }
-        server.start(
-            bridge: bridge,
-            stdinFD: job.stdinFD, stdoutFD: job.stdoutFD, stderrFD: job.stderrFD,
-            cwd: job.cwd, env: job.env, interactive: job.interactive
+        // `withRedirectedIO` binds stdin to fd 0 only when the job is
+        // interactive *and* its stdin descriptor is a real terminal. The
+        // handshake must describe that same wiring, so compute it once here
+        // and share it with both.
+        let stdio = NodeJobStdio(
+            stdinFD: job.stdinFD,
+            stdoutFD: job.stdoutFD,
+            stderrFD: job.stderrFD,
+            stdinBound: job.interactive && job.stdinFD >= 0 && isatty(job.stdinFD) != 0
         )
-        defer { server.stop() }
 
         var env = job.env
-        env["TETHER_IPC_SOCK"] = server.path
-        env["TERMX_IPC_SOCKET"] = server.path
-        env["TETHER_INTERACTIVE"] = job.interactive ? "1" : "0"
-        env["TERMX_INTERACTIVE"] = job.interactive ? "1" : "0"
+        var ipcV2Server: NodeJobIPCServer?
+        var legacyServer: NodeSocketServer?
+
+        if NodeShim.useIPCv2 {
+            guard let server = NodeJobIPCServer(executor: spawnExecutor) else { return 1 }
+            server.start(stdio: stdio, cwd: job.cwd, env: job.env)
+            ipcV2Server = server
+            activeIPCServer = server
+            env["TETHER_IPC_SOCK"] = server.path
+            env["TERMX_IPC_SOCKET"] = server.path
+            // No TETHER_INTERACTIVE on this lane — see NodeShim.useIPCv2.
+            env.removeValue(forKey: "TETHER_INTERACTIVE")
+            env.removeValue(forKey: "TERMX_INTERACTIVE")
+        } else {
+            let bridge = NodeSpawnBridge(executor: spawnExecutor)
+            guard let server = NodeSocketServer(directory: job.cwd) else { return 1 }
+            server.start(
+                bridge: bridge,
+                stdinFD: job.stdinFD, stdoutFD: job.stdoutFD, stderrFD: job.stderrFD,
+                cwd: job.cwd, env: job.env, interactive: job.interactive
+            )
+            legacyServer = server
+            env["TETHER_IPC_SOCK"] = server.path
+            env["TERMX_IPC_SOCKET"] = server.path
+            env["TETHER_INTERACTIVE"] = job.interactive ? "1" : "0"
+            env["TERMX_INTERACTIVE"] = job.interactive ? "1" : "0"
+        }
+
+        defer {
+            ipcV2Server?.stop()
+            legacyServer?.stop()
+            if activeIPCServer === ipcV2Server { activeIPCServer = nil }
+        }
 
         guard let payload = Self.makeBootstrapPayload(from: job, env: env),
               let line = try? JSONSerialization.data(withJSONObject: payload) else {
@@ -69,7 +111,12 @@ final class NodeMobileRuntime: NodeRuntime {
         var request = line
         request.append(0x0A)
 
-        return NodeStdioBridge.withRedirectedOutput(stdoutFD: job.stdoutFD, stderrFD: job.stderrFD) {
+        return NodeStdioBridge.withRedirectedIO(
+            stdinFD: job.stdinFD,
+            stdoutFD: job.stdoutFD,
+            stderrFD: job.stderrFD,
+            interactive: job.interactive
+        ) {
             // Piped stdin is declared on the job payload (`stdinFD`) and read in
             // bootstrap.js. Do not pump into STDIN_FILENO — that never delivers
             // EOF and leaked listeners into later jobs.
@@ -99,7 +146,23 @@ final class NodeMobileRuntime: NodeRuntime {
     }
 
     func interrupt() {
+        // On the v2 lane a running job's foreground child gets a real SIGINT
+        // through the protocol before we fall back to aborting the engine.
+        activeIPCServer?.pushSignal("SIGINT")
         termx_node_request_interrupt()
+    }
+
+    /// Push a new terminal size into the running job (real `SIGWINCH` for a
+    /// Node TUI — impossible on the v1 lane, which polled instead).
+    func resize(cols: Int, rows: Int) {
+        activeIPCServer?.pushResize(cols: cols, rows: rows)
+    }
+
+    /// Graceful signal into the running job over TJIP/2, with no engine-level
+    /// interrupt: the program gets to run its own teardown (a TUI leaves the
+    /// alternate screen, restores the cursor) instead of being aborted.
+    func signalActiveJob(_ name: String) {
+        activeIPCServer?.pushSignal(name)
     }
 
     func requestCancel() {
@@ -138,6 +201,10 @@ final class NodeMobileRuntime: NodeRuntime {
         _ = fcntl(jobPipe.read, F_SETFL, flags | O_NONBLOCK)
 
         var env = NodeEnvironment.merge(base: baseEnv, cwd: cwd)
+        // The engine is launched once; bootstrap.js reads this to pick the same
+        // lane the Swift side did, so the v1 module shims are never layered
+        // over v2's.
+        env["TETHER_IPC_V2"] = NodeShim.useIPCv2 ? "1" : "0"
         env["TETHER_JOB_FD"] = String(jobPipe.read)
         env["TETHER_JOB_REPLY_FD"] = String(replyPipe.write)
         env["TERMX_JOB_FD"] = String(jobPipe.read)

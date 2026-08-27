@@ -47,8 +47,34 @@ final class NodeSpawnBridge {
                 defaultCWD: defaultCWD, defaultEnv: defaultEnv, interactive: interactive
             )
 
+        case "tty":
+            return handleTty(json, stdinFD: stdinFD, stdoutFD: stdoutFD)
+
         default:
             return Self.replyJSON(["error": "unknown kind \(kind)", "ok": false])
+        }
+    }
+
+    private func handleTty(_ json: [String: Any], stdinFD: Int32, stdoutFD: Int32) -> Data {
+        let op = (json["op"] as? String) ?? ""
+        switch op {
+        case "setRawMode":
+            let enabled = json["mode"] as? Bool ?? false
+            // Prefer the live job PTY (stdin); fall back to stdout when stdin was slurped.
+            let fd = stdinFD >= 0 ? stdinFD : stdoutFD
+            guard fd >= 0 else {
+                return Self.replyJSON(["ok": false, "error": "no tty fd"])
+            }
+            let ok = PtyTermios.setRawMode(fd: fd, enabled: enabled)
+            return Self.replyJSON(["ok": ok])
+        case "windowSize":
+            let fd = stdoutFD >= 0 ? stdoutFD : stdinFD
+            if let size = PtyTermios.windowSize(fd: fd) {
+                return Self.replyJSON(["ok": true, "cols": size.cols, "rows": size.rows])
+            }
+            return Self.replyJSON(["ok": false, "error": "winsize unavailable"])
+        default:
+            return Self.replyJSON(["ok": false, "error": "unknown tty op \(op)"])
         }
     }
 
@@ -68,20 +94,10 @@ final class NodeSpawnBridge {
 
             SystemOpen.log("node spawn \(file) \(args.prefix(2).joined(separator: " "))")
 
-            // Desktop programs commonly probe an opener with `which` before using it.
-            let whichBase = (file as NSString).lastPathComponent
-            if whichBase == "which", args.count == 1, SystemOpen.openerCommands.contains(args[0]) {
-                let path = "/usr/local/bin/\(args[0])"
-                SystemOpen.log("which \(args[0]) -> \(path) (guest platform launcher)")
-                return Self.replyJSON([
-                    "ok": true,
-                    "pid": VirtualChildPID.next(),
-                    "exitCode": 0,
-                    "stdout": path + "\n",
-                    "stderr": "",
-                    "signal": NSNull(),
-                ])
-            }
+            // `which` is not special-cased. Guest launchers for the openers
+            // live on PATH in /usr/local/bin, so a real PATH scan finds them —
+            // faking the answer here also meant `which` lied about anything
+            // else the manifest happened to name.
 
             // Desktop CLIs call open/xdg-open; provide the platform opener for any package.
             if let target = SystemOpen.resolve(command: file, arguments: args) {
@@ -185,16 +201,103 @@ enum NodePipe {
 }
 
 enum NodeStdioBridge {
-    /// Redirects process stdout/stderr to target fds for the duration of `body`.
-    static func withRedirectedOutput(stdoutFD: Int32, stderrFD: Int32, body: () -> Int32) -> Int32 {
-        guard stdoutFD >= 0 || stderrFD >= 0 else { return body() }
-        let origOut = dup(STDOUT_FILENO)
-        let origErr = dup(STDERR_FILENO)
-        if stdoutFD >= 0 { dup2(stdoutFD, STDOUT_FILENO) }
-        if stderrFD >= 0 { dup2(stderrFD, STDERR_FILENO) }
+    /// Redirects process stdio to the job's PTY fds for the duration of `body`.
+    /// Interactive stdin must use fd 0 on the engine thread so TUIs read the live PTY
+    /// and emit their own teardown sequences (1049l, rmcup, etc.) — not host synthesis.
+    static func withRedirectedIO(
+        stdinFD: Int32,
+        stdoutFD: Int32,
+        stderrFD: Int32,
+        interactive: Bool,
+        body: () -> Int32
+    ) -> Int32 {
+        let bindStdin = interactive && stdinFD >= 0 && isatty(stdinFD) != 0
+        guard bindStdin || stdoutFD >= 0 || stderrFD >= 0 else { return body() }
+
+        let origIn = bindStdin ? dup(STDIN_FILENO) : -1
+        let origOut = stdoutFD >= 0 ? dup(STDOUT_FILENO) : -1
+        let origErr = stderrFD >= 0 ? dup(STDERR_FILENO) : -1
+
+        if bindStdin { _ = dup2(stdinFD, STDIN_FILENO) }
+        if stdoutFD >= 0 { _ = dup2(stdoutFD, STDOUT_FILENO) }
+        if stderrFD >= 0 { _ = dup2(stderrFD, STDERR_FILENO) }
+
+
         let code = body()
+
+        if origIn >= 0 { dup2(origIn, STDIN_FILENO); close(origIn) }
         if origOut >= 0 { dup2(origOut, STDOUT_FILENO); close(origOut) }
         if origErr >= 0 { dup2(origErr, STDERR_FILENO); close(origErr) }
         return code
+    }
+
+    /// Redirects process stdout/stderr to target fds for the duration of `body`.
+    static func withRedirectedOutput(stdoutFD: Int32, stderrFD: Int32, body: () -> Int32) -> Int32 {
+        withRedirectedIO(stdinFD: -1, stdoutFD: stdoutFD, stderrFD: stderrFD, interactive: false, body: body)
+    }
+
+}
+
+/// Applies real termios raw/cooked mode on the Darwin PTY backing an interactive job.
+/// Node's `tty.setRawMode` shim calls this over IPC so Ink-style TUIs get character input.
+enum PtyTermios {
+    private static let lock = NSLock()
+    private static var saved: [Int32: termios] = [:]
+
+    static func setRawMode(fd: Int32, enabled: Bool) -> Bool {
+        guard fd >= 0 else { return false }
+        lock.lock()
+        defer { lock.unlock() }
+        if enabled {
+            var original = termios()
+            guard tcgetattr(fd, &original) == 0 else { return false }
+            if saved[fd] == nil {
+                saved[fd] = original
+            }
+            var raw = original
+            cfmakeraw(&raw)
+            raw.c_lflag &= ~tcflag_t(ECHO | ICANON | ISIG)
+            return tcsetattr(fd, TCSANOW, &raw) == 0
+        } else {
+            if var original = saved.removeValue(forKey: fd) {
+                return tcsetattr(fd, TCSANOW, &original) == 0
+            }
+            var current = termios()
+            guard tcgetattr(fd, &current) == 0 else { return false }
+            current.c_lflag |= tcflag_t(ECHO | ICANON | ISIG)
+            current.c_iflag |= tcflag_t(ICRNL | IXON)
+            current.c_oflag |= tcflag_t(OPOST)
+            return tcsetattr(fd, TCSANOW, &current) == 0
+        }
+    }
+
+    /// Whether the terminal is currently in raw mode, read from the live
+    /// termios rather than from bookkeeping — a program can change the mode
+    /// behind our back, and the protocol must report what is true now.
+    static func isRawMode(fd: Int32) -> Bool {
+        guard fd >= 0 else { return false }
+        var current = termios()
+        guard tcgetattr(fd, &current) == 0 else { return false }
+        return (current.c_lflag & tcflag_t(ICANON)) == 0 && (current.c_lflag & tcflag_t(ECHO)) == 0
+    }
+
+    static func windowSize(fd: Int32) -> (cols: Int, rows: Int)? {
+        guard fd >= 0 else { return nil }
+        var size = winsize()
+        guard ioctl(fd, TIOCGWINSZ, &size) == 0 else { return nil }
+        let cols = Int(size.ws_col)
+        let rows = Int(size.ws_row)
+        guard cols > 0, rows > 0 else { return nil }
+        return (cols, rows)
+    }
+
+    /// Push a new window size onto a PTY master and notify the foreground job.
+    @discardableResult
+    static func setWindowSize(fd: Int32, cols: Int, rows: Int) -> Bool {
+        guard fd >= 0, cols > 0, rows > 0 else { return false }
+        var size = winsize()
+        size.ws_col = UInt16(min(cols, Int(UInt16.max)))
+        size.ws_row = UInt16(min(rows, Int(UInt16.max)))
+        return ioctl(fd, TIOCSWINSZ, &size) == 0
     }
 }

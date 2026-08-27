@@ -1,0 +1,26 @@
+{
+  "name": "tether-shim-v2",
+  "version": "2.0.0",
+  "description": "TJIP/2 client-side terminal shim for embedded Node.js on iOS: TTY truth from the protocol handshake, real child processes, and flow-controlled stdio. Zero dependencies.",
+  "main": "lib/index.js",
+  "scripts": {
+    "test": "node --test test/ || node --test \"test/**/*.js\"",
+    "test:spec": "node --test test/"
+  },
+  "keywords": [
+    "tty",
+    "pty",
+    "terminal",
+    "tjip",
+    "shim",
+    "embedded"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "files": [
+    "lib/",
+    "HANDOFF.md"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "tether-bun-compat",
+  "version": "0.1.0",
+  "description": "Zero-dependency Node.js polyfill for a faithful subset of the Bun global.",
+  "main": "lib/index.js",
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "bun",
+    "polyfill",
+    "compat",
+    "shim"
+  ],
+  "license": "MIT",
+  "files": [
+    "lib/",
+    "HANDOFF.md"
+  ]
+}

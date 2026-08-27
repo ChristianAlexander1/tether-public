@@ -1,4 +1,5 @@
 import Foundation
+import TetherStorageCore
 import TermXCore
 import TermXBlinkBridge
 
@@ -21,6 +22,58 @@ public enum LinuxGuestError: Error, Equatable {
 }
 
 // MARK: - Path mapping (/workspaces)
+
+/// `StorageFileSystem` over a real host directory, used only to answer the
+/// symlink and existence questions `ConfinedPathResolver` asks while walking a
+/// path. It never writes: `removeTree` is unreachable from the resolver and is
+/// implemented as a no-op rather than given the power to delete.
+final class HostDirectoryFileSystem: StorageFileSystem {
+    let root: URL
+
+    init(root: URL) { self.root = root }
+
+    private func url(_ relativePath: String) -> URL? {
+        guard !relativePath.isEmpty, !relativePath.hasPrefix("/") else { return nil }
+        var candidate = root
+        for component in relativePath.split(separator: "/", omittingEmptySubsequences: true) {
+            if component == ".." { return nil }
+            candidate.appendPathComponent(String(component))
+        }
+        return candidate
+    }
+
+    func exists(_ relativePath: String) -> Bool {
+        guard let url = url(relativePath) else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    func isDirectory(_ relativePath: String) -> Bool {
+        guard let url = url(relativePath) else { return false }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return false
+        }
+        return isDirectory.boolValue
+    }
+
+    func sizeOfTree(_ relativePath: String) throws -> Int64 { 0 }
+
+    func removeTree(_ relativePath: String) throws {}
+
+    func list(_ relativePath: String) throws -> [String] {
+        guard let url = url(relativePath) else { return [] }
+        return (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
+    }
+
+    func destinationOfSymlink(_ relativePath: String) throws -> String? {
+        guard let url = url(relativePath) else { return nil }
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeSymbolicLink else {
+            return nil
+        }
+        return try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)
+    }
+}
 
 public struct LinuxPathMapper {
     public let workspacesHostRoot: URL
@@ -48,28 +101,37 @@ public struct LinuxPathMapper {
     }
 
     /// Maps `/workspaces/<name>/…` to a host filesystem path for native reads.
+    ///
+    /// Confinement is delegated to `ConfinedPathResolver`, which checks **every
+    /// traversed component** for a symlink rather than only the leaf, bounds
+    /// symlink hops so a cycle terminates, and compares path components instead
+    /// of string prefixes (so `/workspaces-elsewhere` cannot pass a
+    /// `/workspaces` prefix test). The public API here is unchanged.
     public func hostPath(forGuestPath guestPath: String) throws -> String {
         let validated = try validateGuestPath(guestPath)
         let suffix = validated.dropFirst(guestWorkspacesPath.count)
         let trimmed = suffix.hasPrefix("/") ? String(suffix.dropFirst()) : String(suffix)
-        let root = workspacesHostRoot.standardizedFileURL.resolvingSymlinksInPath()
-        let candidate = root.appendingPathComponent(trimmed).standardizedFileURL
-        guard candidate.path == root.path || candidate.path.hasPrefix(root.path + "/") else {
-            throw LinuxGuestError.invalidGuestPath
-        }
 
-        // `resolvingSymlinksInPath()` does not reliably resolve a symlink when
-        // the final leaf does not exist. Resolve the nearest existing ancestor
-        // so `/workspaces/link-to-outside/new-file` is rejected too.
-        var existingAncestor = candidate
-        while !FileManager.default.fileExists(atPath: existingAncestor.path), existingAncestor.path != root.path {
-            existingAncestor.deleteLastPathComponent()
-        }
-        let resolvedAncestor = existingAncestor.resolvingSymlinksInPath()
-        guard resolvedAncestor.path == root.path || resolvedAncestor.path.hasPrefix(root.path + "/") else {
+        let root = workspacesHostRoot.standardizedFileURL.resolvingSymlinksInPath()
+        guard !trimmed.isEmpty else { return root.path }
+
+        // The resolver addresses the file system by the same component list it
+        // builds from `confinementRoot`, so the adapter must be rooted at `/`
+        // — not at the workspace directory — or every lookup would be resolved
+        // twice against the root and find nothing.
+        let resolver = ConfinedPathResolver(
+            confinementRoot: root.path,
+            fileSystem: HostDirectoryFileSystem(root: URL(fileURLWithPath: "/"))
+        )
+        switch resolver.resolve(trimmed) {
+        case .success:
+            // The resolver confirmed the path stays inside the root. Return the
+            // lexical candidate: callers open the path they asked for, not a
+            // symlink-flattened rewrite of it.
+            return root.appendingPathComponent(trimmed).standardizedFileURL.path
+        case .failure:
             throw LinuxGuestError.invalidGuestPath
         }
-        return candidate.path
     }
 
     public var guestWorkspacesPath: String { "/workspaces" }
@@ -93,7 +155,15 @@ public enum AlpineBootstrap {
 
         let marker = rootfs.appendingPathComponent(".tether-bootstrapped")
         let legacyMarker = rootfs.appendingPathComponent(".termx-bootstrapped")
-        if fm.fileExists(atPath: marker.path) || fm.fileExists(atPath: legacyMarker.path) { return }
+        let busybox = rootfs.appendingPathComponent("bin/busybox")
+        // Storage may delete the rootfs while an in-memory service still thinks it
+        // is ready; only skip download when the real Alpine userland is present.
+        if fm.fileExists(atPath: busybox.path),
+           fm.fileExists(atPath: marker.path) || fm.fileExists(atPath: legacyMarker.path) {
+            return
+        }
+        if fm.fileExists(atPath: marker.path) { try? fm.removeItem(at: marker) }
+        if fm.fileExists(atPath: legacyMarker.path) { try? fm.removeItem(at: legacyMarker) }
 
         let url = cdnURL(version: version)
         let (archive, _) = try await URLSession.shared.download(from: url)
@@ -200,9 +270,64 @@ public final class BlinkLinuxService: LinuxGuestRuntime {
         try FileManager.default.createDirectory(at: pathMapper.workspacesHostRoot, withIntermediateDirectories: true)
         try runtime.prepare(rootfs: rootfs, mapper: pathMapper)
         state = .ready
+        await provisionTerminfoIfMissing()
+    }
+
+    /// The Alpine minirootfs ships no terminfo database, so `TERM=xterm-256color`
+    /// resolves to nothing until some package pulls ncurses in. Install the base
+    /// terminfo entries once, right after bootstrap, so curses programs work
+    /// even when they do not depend on ncurses themselves.
+    ///
+    /// Best-effort by design: offline devices, a missing emulator, or an apk
+    /// failure must not stop a shell from opening. Component A answers
+    /// XTGETTCAP directly, so capability probes still succeed without the
+    /// database — this only widens what works, it is never load-bearing.
+    private func provisionTerminfoIfMissing() async {
+        guard !hasTerminfoDatabase else { return }
+        guard let apk = LinuxFallback.guestCommandPath(name: "apk", rootfs: rootfs) else { return }
+        let devNull = open("/dev/null", O_RDWR)
+        defer { if devNull >= 0 { close(devNull) } }
+        _ = await runtime.run(
+            argv: [apk, "add", "--no-cache", "ncurses-terminfo-base"],
+            cwd: "/",
+            stdinFD: devNull, stdoutFD: devNull, stderrFD: devNull,
+            interactive: false,
+            shouldInterrupt: { false }
+        )
+    }
+
+    /// Whether the guest has a terminfo entry tree on disk.
+    public var hasTerminfoDatabase: Bool {
+        let fm = FileManager.default
+        for base in ["usr/share/terminfo", "etc/terminfo", "lib/terminfo"] {
+            var isDir: ObjCBool = false
+            let path = rootfs.appendingPathComponent(base).path
+            if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { return true }
+        }
+        return false
+    }
+
+    /// True when the on-disk Alpine rootfs still has a usable busybox userland.
+    public var hasRootfs: Bool {
+        FileManager.default.fileExists(atPath: rootfs.appendingPathComponent("bin/busybox").path)
+    }
+
+    /// Storage may delete Documents/linux while this service is still alive.
+    /// Drop back to needsBootstrap so the next shell session re-downloads Alpine.
+    public func invalidateIfRootfsMissing() {
+        guard state == .ready else { return }
+        if !hasRootfs {
+            state = .needsBootstrap
+        }
+    }
+
+    /// Explicit invalidation after Storage removes the linux directory.
+    public func markNeedsBootstrap() {
+        state = .needsBootstrap
     }
 
     public func run(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool) async -> Int32 {
+        invalidateIfRootfsMissing()
         if state == .needsBootstrap {
             do {
                 try await bootstrap()

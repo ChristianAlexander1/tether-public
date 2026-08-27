@@ -13,7 +13,9 @@ let package = Package(
         .package(path: "Packages/TermXNode"),
         .package(path: "Packages/TermXClaude"),
         .package(path: "Packages/TermXLinux"),
-        .package(path: "External/TetherWasm")
+        .package(path: "External/TetherWasm"),
+        .package(path: "External/TetherSessionCore"),
+        .package(path: "External/TetherStorageCore")
     ],
     targets: [
         .target(name: "TermXIntegration", dependencies: [
@@ -24,7 +26,9 @@ let package = Package(
             .product(name: "TermXNode", package: "TermXNode"),
             .product(name: "TermXClaude", package: "TermXClaude"),
             .product(name: "TermXLinux", package: "TermXLinux"),
-            .product(name: "TetherWasm", package: "TetherWasm")
+            .product(name: "TetherWasm", package: "TetherWasm"),
+            .product(name: "TetherSessionCore", package: "TetherSessionCore"),
+            .product(name: "TetherStorageCore", package: "TetherStorageCore")
         ], path: "App/IntegrationSource"),
         .testTarget(name: "TermXIntegrationTests", dependencies: ["TermXIntegration"], path: "App/IntegrationTests")
     ]

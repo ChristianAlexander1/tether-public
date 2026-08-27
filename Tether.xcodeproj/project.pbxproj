@@ -7,13 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		08AC939BDE1BFF68175373E1 /* TetherSessionCore in Frameworks */ = {isa = PBXBuildFile; productRef = 511234A761F8586ACE726F9D /* TetherSessionCore */; };
 		0FA122C2D24D64AA37BEA89F /* nodejs-mobile-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 45A2818B6F4B9122AABB0CD0 /* nodejs-mobile-MIT.txt */; };
 		187B1AB6C8C6133973A2AA03 /* TermXUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1C218C37C383D86FD28F274B /* TermXUI */; };
+		1EB23F10E69228A7A236A328 /* TetherStorageCore in Frameworks */ = {isa = PBXBuildFile; productRef = B924D98D031D1C6BE4C0B622 /* TetherStorageCore */; };
 		22469AFCF24C6E86A8EFAA5F /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDCFA4C9A1DF10C2D3AA1EBD /* LicensesView.swift */; };
 		27E39B49EBE68AC0F1077C01 /* SwiftTerm-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = D039FC37EA04581221A1AE9F /* SwiftTerm-MIT.txt */; };
 		2F38AC268B12F85297C94FDE /* TermXLinux in Frameworks */ = {isa = PBXBuildFile; productRef = 67F03DE87792ABE67C90AED1 /* TermXLinux */; };
 		35C0B6D3A4B4F2DB4D66A801 /* TermXIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A471776D23739CB33A7D1C45 /* TermXIntegration.swift */; };
 		3AEB67372A90121C6F51056C /* StorageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6D2F3A2DCD10432B1A1E8D /* StorageView.swift */; };
+		4B295AE328F92A1346DF9A3D /* TetherStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7872F58C04D680A79972F41F /* TetherStorage.swift */; };
 		543C0DF4A76F9A9CE3F5B4FA /* ScreensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43246D628E412634714F887A /* ScreensTests.swift */; };
 		58FB1E1189031ADCC91266EB /* CPython-PSF.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5473D5D5148F294F233904FE /* CPython-PSF.txt */; };
 		62EB64BA20D3479FB472F9EB /* TermXClaude in Frameworks */ = {isa = PBXBuildFile; productRef = 77D8F61BEA5FE488F36F08DD /* TermXClaude */; };
@@ -23,12 +26,16 @@
 		78B918089B86C1072D4114C8 /* JetBrainsMono-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = EF0006C74E7E930CD4C61986 /* JetBrainsMono-OFL.txt */; };
 		79403EDD25F842FBF8059A8D /* Blink-ISC.txt in Resources */ = {isa = PBXBuildFile; fileRef = 941DD19662831CB65C0FFFD7 /* Blink-ISC.txt */; };
 		87A13BFB2E35BD9BBBC18D19 /* TetherApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B744DD409A97EBA596458FC3 /* TetherApp.swift */; };
+		8D3015E1E05907BCC5DC7B84 /* WorkspaceSessionServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B3FA86D6C855C8E76089EB9 /* WorkspaceSessionServices.swift */; };
+		A1BB5964ADFB842C6A39EEE1 /* AppContainerFileSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D76387502C620B227F870B8 /* AppContainerFileSystem.swift */; };
 		A5C68B34AF6C6EF6C5F2EA2F /* TetherWasm in Frameworks */ = {isa = PBXBuildFile; productRef = A5102732E58492853EE99A15 /* TetherWasm */; };
 		A923FBB3708E4F56E83E5833 /* TermXFiles in Frameworks */ = {isa = PBXBuildFile; productRef = 5F3EBCFC2324B7A6ECFBCECD /* TermXFiles */; };
 		AA554DEB604ABC9BDA3F5808 /* Python-Apple-support-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 3A86CE8DDC61D9888B45748D /* Python-Apple-support-MIT.txt */; };
 		B7096884BDF1A1238A5E20E4 /* TerminalTypingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60D6A68C930567AD8071E028 /* TerminalTypingTests.swift */; };
 		CDB6A28B4A14D785D6C7CB3D /* TermXPython in Frameworks */ = {isa = PBXBuildFile; productRef = A56AE5B621BDC165D14BB831 /* TermXPython */; };
+		D16801FE8AD3BA30AE05C970 /* SessionCommandRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7CBA6FC9F69AE51A459DECD /* SessionCommandRunner.swift */; };
 		DD4F064FFAF7B5A78E852ECD /* TermXCore in Frameworks */ = {isa = PBXBuildFile; productRef = 73BD062FC4D571950C0020FA /* TermXCore */; };
+		DE7659758E781A36708F7B2E /* ScrollbackStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A594E5C8BAC3E62CEA3479 /* ScrollbackStore.swift */; };
 		ED828C7F00EB6B8501EB1324 /* FolderPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF4D7CC447AD4DFD564CBDA /* FolderPickerTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -46,27 +53,34 @@
 		077D77860334CAFF914D5A9D /* TetherWasmService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TetherWasmService.swift; sourceTree = "<group>"; };
 		20E61DA33307688868971A6C /* TermXPython */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXPython; path = Packages/TermXPython; sourceTree = SOURCE_ROOT; };
 		2F2CA052180B01BD2A5B6260 /* Tether.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Tether.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		33604978801F97BC14206FD3 /* TetherSessionCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TetherSessionCore; path = External/TetherSessionCore; sourceTree = SOURCE_ROOT; };
 		3A86CE8DDC61D9888B45748D /* Python-Apple-support-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Python-Apple-support-MIT.txt"; sourceTree = "<group>"; };
 		43246D628E412634714F887A /* ScreensTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreensTests.swift; sourceTree = "<group>"; };
 		43785B4E9654F465E4E00204 /* WorkspaceFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFilesView.swift; sourceTree = "<group>"; };
 		45A2818B6F4B9122AABB0CD0 /* nodejs-mobile-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "nodejs-mobile-MIT.txt"; sourceTree = "<group>"; };
 		5473D5D5148F294F233904FE /* CPython-PSF.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "CPython-PSF.txt"; sourceTree = "<group>"; };
+		5B3FA86D6C855C8E76089EB9 /* WorkspaceSessionServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSessionServices.swift; sourceTree = "<group>"; };
 		5DF4D7CC447AD4DFD564CBDA /* FolderPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPickerTests.swift; sourceTree = "<group>"; };
 		60D6A68C930567AD8071E028 /* TerminalTypingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTypingTests.swift; sourceTree = "<group>"; };
 		62F41048A949F1756E815092 /* TermXCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXCore; path = Packages/TermXCore; sourceTree = SOURCE_ROOT; };
 		69D1A379300182F229FE80E0 /* TermXFiles */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXFiles; path = Packages/TermXFiles; sourceTree = SOURCE_ROOT; };
 		77EE2413C9A28F64E58F69FE /* TermXNode */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXNode; path = Packages/TermXNode; sourceTree = SOURCE_ROOT; };
+		7872F58C04D680A79972F41F /* TetherStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TetherStorage.swift; sourceTree = "<group>"; };
+		7D76387502C620B227F870B8 /* AppContainerFileSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppContainerFileSystem.swift; sourceTree = "<group>"; };
 		8B6D2F3A2DCD10432B1A1E8D /* StorageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageView.swift; sourceTree = "<group>"; };
 		8F03D568A09D680B362F7F58 /* TetherUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TetherUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		941DD19662831CB65C0FFFD7 /* Blink-ISC.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Blink-ISC.txt"; sourceTree = "<group>"; };
+		99A594E5C8BAC3E62CEA3479 /* ScrollbackStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollbackStore.swift; sourceTree = "<group>"; };
 		A3C92134B3E7A5BF8C3A460D /* TermXClaude */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXClaude; path = Packages/TermXClaude; sourceTree = SOURCE_ROOT; };
 		A471776D23739CB33A7D1C45 /* TermXIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TermXIntegration.swift; sourceTree = "<group>"; };
 		B744DD409A97EBA596458FC3 /* TetherApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TetherApp.swift; sourceTree = "<group>"; };
 		C2487BACDA2EB50E74CE6545 /* TetherWasm */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TetherWasm; path = External/TetherWasm; sourceTree = SOURCE_ROOT; };
+		C5348E3CD9B83014319D70D5 /* TetherStorageCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TetherStorageCore; path = External/TetherStorageCore; sourceTree = SOURCE_ROOT; };
 		CEC344C64C4F792976756B1E /* TermXLinux */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXLinux; path = Packages/TermXLinux; sourceTree = SOURCE_ROOT; };
 		D039FC37EA04581221A1AE9F /* SwiftTerm-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "SwiftTerm-MIT.txt"; sourceTree = "<group>"; };
 		EDCFA4C9A1DF10C2D3AA1EBD /* LicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
 		EF0006C74E7E930CD4C61986 /* JetBrainsMono-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "JetBrainsMono-OFL.txt"; sourceTree = "<group>"; };
+		F7CBA6FC9F69AE51A459DECD /* SessionCommandRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCommandRunner.swift; sourceTree = "<group>"; };
 		FA27303C63C62B80035CEB2D /* TermXUI */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXUI; path = Packages/TermXUI; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -83,6 +97,8 @@
 				62EB64BA20D3479FB472F9EB /* TermXClaude in Frameworks */,
 				2F38AC268B12F85297C94FDE /* TermXLinux in Frameworks */,
 				A5C68B34AF6C6EF6C5F2EA2F /* TetherWasm in Frameworks */,
+				08AC939BDE1BFF68175373E1 /* TetherSessionCore in Frameworks */,
+				1EB23F10E69228A7A236A328 /* TetherStorageCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -96,6 +112,7 @@
 				8B6D2F3A2DCD10432B1A1E8D /* StorageView.swift */,
 				B744DD409A97EBA596458FC3 /* TetherApp.swift */,
 				43785B4E9654F465E4E00204 /* WorkspaceFilesView.swift */,
+				5B3FA86D6C855C8E76089EB9 /* WorkspaceSessionServices.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -135,6 +152,8 @@
 				77EE2413C9A28F64E58F69FE /* TermXNode */,
 				20E61DA33307688868971A6C /* TermXPython */,
 				FA27303C63C62B80035CEB2D /* TermXUI */,
+				33604978801F97BC14206FD3 /* TetherSessionCore */,
+				C5348E3CD9B83014319D70D5 /* TetherStorageCore */,
 				C2487BACDA2EB50E74CE6545 /* TetherWasm */,
 			);
 			path = Packages;
@@ -163,7 +182,11 @@
 		917A7F1338E14F6221076288 /* IntegrationSource */ = {
 			isa = PBXGroup;
 			children = (
+				7D76387502C620B227F870B8 /* AppContainerFileSystem.swift */,
+				99A594E5C8BAC3E62CEA3479 /* ScrollbackStore.swift */,
+				F7CBA6FC9F69AE51A459DECD /* SessionCommandRunner.swift */,
 				A471776D23739CB33A7D1C45 /* TermXIntegration.swift */,
+				7872F58C04D680A79972F41F /* TetherStorage.swift */,
 				077D77860334CAFF914D5A9D /* TetherWasmService.swift */,
 			);
 			name = IntegrationSource;
@@ -205,6 +228,8 @@
 				77D8F61BEA5FE488F36F08DD /* TermXClaude */,
 				67F03DE87792ABE67C90AED1 /* TermXLinux */,
 				A5102732E58492853EE99A15 /* TetherWasm */,
+				511234A761F8586ACE726F9D /* TetherSessionCore */,
+				B924D98D031D1C6BE4C0B622 /* TetherStorageCore */,
 			);
 			productName = Tether;
 			productReference = 2F2CA052180B01BD2A5B6260 /* Tether.app */;
@@ -259,6 +284,8 @@
 				3EBBAA98AE99F9DAAD8BCB95 /* XCLocalSwiftPackageReference "Packages/TermXNode" */,
 				B6FF80F2E824FFF1D38FB554 /* XCLocalSwiftPackageReference "Packages/TermXPython" */,
 				E5F19B305EEE9324479AD77B /* XCLocalSwiftPackageReference "Packages/TermXUI" */,
+				64C2B96BA447F031375DF5F9 /* XCLocalSwiftPackageReference "External/TetherSessionCore" */,
+				7206C3EBF49169252A85618D /* XCLocalSwiftPackageReference "External/TetherStorageCore" */,
 				03022F8B8F00B213930A88FC /* XCLocalSwiftPackageReference "External/TetherWasm" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -325,12 +352,17 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1BB5964ADFB842C6A39EEE1 /* AppContainerFileSystem.swift in Sources */,
 				22469AFCF24C6E86A8EFAA5F /* LicensesView.swift in Sources */,
+				DE7659758E781A36708F7B2E /* ScrollbackStore.swift in Sources */,
+				D16801FE8AD3BA30AE05C970 /* SessionCommandRunner.swift in Sources */,
 				3AEB67372A90121C6F51056C /* StorageView.swift in Sources */,
 				35C0B6D3A4B4F2DB4D66A801 /* TermXIntegration.swift in Sources */,
 				87A13BFB2E35BD9BBBC18D19 /* TetherApp.swift in Sources */,
+				4B295AE328F92A1346DF9A3D /* TetherStorage.swift in Sources */,
 				65A3B9BDF09B8F1C91496DD1 /* TetherWasmService.swift in Sources */,
 				6808FD7FE37424A97359B882 /* WorkspaceFilesView.swift in Sources */,
+				8D3015E1E05907BCC5DC7B84 /* WorkspaceSessionServices.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -577,6 +609,14 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/TermXNode;
 		};
+		64C2B96BA447F031375DF5F9 /* XCLocalSwiftPackageReference "External/TetherSessionCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = External/TetherSessionCore;
+		};
+		7206C3EBF49169252A85618D /* XCLocalSwiftPackageReference "External/TetherStorageCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = External/TetherStorageCore;
+		};
 		B6FF80F2E824FFF1D38FB554 /* XCLocalSwiftPackageReference "Packages/TermXPython" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/TermXPython;
@@ -608,6 +648,10 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = TermXUI;
 		};
+		511234A761F8586ACE726F9D /* TetherSessionCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TetherSessionCore;
+		};
 		580726BE37C058579000358B /* TermXNode */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TermXNode;
@@ -635,6 +679,10 @@
 		A56AE5B621BDC165D14BB831 /* TermXPython */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TermXPython;
+		};
+		B924D98D031D1C6BE4C0B622 /* TetherStorageCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TetherStorageCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

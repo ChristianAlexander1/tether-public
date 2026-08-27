@@ -1,0 +1,105 @@
+# TJIP/2 golden wire frames — interop contract with the JS client.  DO NOT EDIT.
+# Each frame: the canonical JSON payload, then the exact wire bytes (hex)
+# = 4-byte big-endian length prefix + the UTF-8 JSON payload.
+# Object keys are serialized in sorted (deterministic) order; parsers ignore key order.
+
+
+== hello.req ==
+Payload JSON: {"body":{"features":["tty","spawn","flow"],"proto":2,"role":"node-shim"},"id":1,"kind":"req","type":"hello","v":2}
+Hex (118 bytes): 000000727b22626f6479223a7b226665617475726573223a5b22747479222c22737061776e222c22666c6f77225d2c2270726f746f223a322c22726f6c65223a226e6f64652d7368696d227d2c226964223a312c226b696e64223a22726571222c2274797065223a2268656c6c6f222c2276223a327d
+Frame size incl. 4-byte prefix: 118 bytes
+
+== hello.res ==
+Payload JSON: {"body":{"colorTerm":"truecolor","cols":80,"features":["tty","spawn","flow"],"ok":true,"proto":2,"rows":24,"termName":"xterm-256color","ttyFds":[0,1,2]},"id":1,"kind":"res","type":"hello","v":2}
+Hex (198 bytes): 000000c27b22626f6479223a7b22636f6c6f725465726d223a2274727565636f6c6f72222c22636f6c73223a38302c226665617475726573223a5b22747479222c22737061776e222c22666c6f77225d2c226f6b223a747275652c2270726f746f223a322c22726f7773223a32342c227465726d4e616d65223a22787465726d2d323536636f6c6f72222c22747479466473223a5b302c312c325d7d2c226964223a312c226b696e64223a22726573222c2274797065223a2268656c6c6f222c2276223a327d
+Frame size incl. 4-byte prefix: 198 bytes
+
+== tty.get.req ==
+Payload JSON: {"body":{"fd":0},"id":2,"kind":"req","type":"tty.get","v":2}
+Hex (64 bytes): 0000003c7b22626f6479223a7b226664223a307d2c226964223a322c226b696e64223a22726571222c2274797065223a227474792e676574222c2276223a327d
+Frame size incl. 4-byte prefix: 64 bytes
+
+== tty.get.res ==
+Payload JSON: {"body":{"cols":80,"isRaw":false,"isTTY":true,"ok":true,"rows":24},"id":2,"kind":"res","type":"tty.get","v":2}
+Hex (114 bytes): 0000006e7b22626f6479223a7b22636f6c73223a38302c226973526177223a66616c73652c226973545459223a747275652c226f6b223a747275652c22726f7773223a32347d2c226964223a322c226b696e64223a22726573222c2274797065223a227474792e676574222c2276223a327d
+Frame size incl. 4-byte prefix: 114 bytes
+
+== tty.setRawMode.req ==
+Payload JSON: {"body":{"fd":0,"mode":true},"id":3,"kind":"req","type":"tty.setRawMode","v":2}
+Hex (83 bytes): 0000004f7b22626f6479223a7b226664223a302c226d6f6465223a747275657d2c226964223a332c226b696e64223a22726571222c2274797065223a227474792e7365745261774d6f6465222c2276223a327d
+Frame size incl. 4-byte prefix: 83 bytes
+
+== tty.setRawMode.res ==
+Payload JSON: {"body":{"ok":true,"wasRaw":false},"id":3,"kind":"res","type":"tty.setRawMode","v":2}
+Hex (89 bytes): 000000557b22626f6479223a7b226f6b223a747275652c22776173526177223a66616c73657d2c226964223a332c226b696e64223a22726573222c2274797065223a227474792e7365745261774d6f6465222c2276223a327d
+Frame size incl. 4-byte prefix: 89 bytes
+
+== tty.windowSize.req ==
+Payload JSON: {"body":{"fd":1},"id":4,"kind":"req","type":"tty.windowSize","v":2}
+Hex (71 bytes): 000000437b22626f6479223a7b226664223a317d2c226964223a342c226b696e64223a22726571222c2274797065223a227474792e77696e646f7753697a65222c2276223a327d
+Frame size incl. 4-byte prefix: 71 bytes
+
+== tty.windowSize.res ==
+Payload JSON: {"body":{"cols":80,"ok":true,"rows":24},"id":4,"kind":"res","type":"tty.windowSize","v":2}
+Hex (94 bytes): 0000005a7b22626f6479223a7b22636f6c73223a38302c226f6b223a747275652c22726f7773223a32347d2c226964223a342c226b696e64223a22726573222c2274797065223a227474792e77696e646f7753697a65222c2276223a327d
+Frame size incl. 4-byte prefix: 94 bytes
+
+== spawn.start.req ==
+Payload JSON: {"body":{"argv":["ls","-la"],"cwd":"/work","env":{"PATH":"/usr/bin"},"pty":false,"stdio":["pipe","pipe","pipe"]},"id":5,"kind":"req","type":"spawn.start","v":2}
+Hex (164 bytes): 000000a07b22626f6479223a7b2261726776223a5b226c73222c222d6c61225d2c22637764223a222f776f726b222c22656e76223a7b2250415448223a222f7573722f62696e227d2c22707479223a66616c73652c22737464696f223a5b2270697065222c2270697065222c2270697065225d7d2c226964223a352c226b696e64223a22726571222c2274797065223a22737061776e2e7374617274222c2276223a327d
+Frame size incl. 4-byte prefix: 164 bytes
+
+== spawn.start.res ==
+Payload JSON: {"body":{"ok":true,"pid":42},"id":5,"kind":"res","type":"spawn.start","v":2}
+Hex (80 bytes): 0000004c7b22626f6479223a7b226f6b223a747275652c22706964223a34327d2c226964223a352c226b696e64223a22726573222c2274797065223a22737061776e2e7374617274222c2276223a327d
+Frame size incl. 4-byte prefix: 80 bytes
+
+== spawn.kill.req ==
+Payload JSON: {"body":{"pid":42,"signal":"SIGTERM"},"id":6,"kind":"req","type":"spawn.kill","v":2}
+Hex (88 bytes): 000000547b22626f6479223a7b22706964223a34322c227369676e616c223a225349475445524d227d2c226964223a362c226b696e64223a22726571222c2274797065223a22737061776e2e6b696c6c222c2276223a327d
+Frame size incl. 4-byte prefix: 88 bytes
+
+== spawn.kill.res ==
+Payload JSON: {"body":{"ok":true},"id":6,"kind":"res","type":"spawn.kill","v":2}
+Hex (70 bytes): 000000427b22626f6479223a7b226f6b223a747275657d2c226964223a362c226b696e64223a22726573222c2274797065223a22737061776e2e6b696c6c222c2276223a327d
+Frame size incl. 4-byte prefix: 70 bytes
+
+== error.res ==
+Payload JSON: {"body":{"code":"ENOENT","message":"no such file or directory","ok":false},"id":5,"kind":"res","type":"spawn.start","v":2}
+Hex (126 bytes): 0000007a7b22626f6479223a7b22636f6465223a22454e4f454e54222c226d657373616765223a226e6f20737563682066696c65206f72206469726563746f7279222c226f6b223a66616c73657d2c226964223a352c226b696e64223a22726573222c2274797065223a22737061776e2e7374617274222c2276223a327d
+Frame size incl. 4-byte prefix: 126 bytes
+
+== tty.resize.evt ==
+Payload JSON: {"body":{"cols":120,"rows":30},"kind":"evt","type":"tty.resize","v":2}
+Hex (74 bytes): 000000467b22626f6479223a7b22636f6c73223a3132302c22726f7773223a33307d2c226b696e64223a22657674222c2274797065223a227474792e726573697a65222c2276223a327d
+Frame size incl. 4-byte prefix: 74 bytes
+
+== tty.signal.evt ==
+Payload JSON: {"body":{"signal":"SIGWINCH"},"kind":"evt","type":"tty.signal","v":2}
+Hex (73 bytes): 000000457b22626f6479223a7b227369676e616c223a2253494757494e4348227d2c226b696e64223a22657674222c2274797065223a227474792e7369676e616c222c2276223a327d
+Frame size incl. 4-byte prefix: 73 bytes
+
+== spawn.stdout.evt ==
+Payload JSON: {"body":{"dataB64":"aGVsbG8=","pid":42},"kind":"evt","type":"spawn.stdout","v":2}
+Hex (85 bytes): 000000517b22626f6479223a7b2264617461423634223a22614756736247383d222c22706964223a34327d2c226b696e64223a22657674222c2274797065223a22737061776e2e7374646f7574222c2276223a327d
+Frame size incl. 4-byte prefix: 85 bytes
+
+== spawn.exit.evt ==
+Payload JSON: {"body":{"code":0,"pid":42,"signal":null},"kind":"evt","type":"spawn.exit","v":2}
+Hex (85 bytes): 000000517b22626f6479223a7b22636f6465223a302c22706964223a34322c227369676e616c223a6e756c6c7d2c226b696e64223a22657674222c2274797065223a22737061776e2e65786974222c2276223a327d
+Frame size incl. 4-byte prefix: 85 bytes
+
+== flow.ack.evt ==
+Payload JSON: {"body":{"bytes":65536,"pid":42},"kind":"evt","type":"flow.ack","v":2}
+Hex (74 bytes): 000000467b22626f6479223a7b226279746573223a36353533362c22706964223a34327d2c226b696e64223a22657674222c2274797065223a22666c6f772e61636b222c2276223a327d
+Frame size incl. 4-byte prefix: 74 bytes
+
+== spawn.stdin.req ==
+Payload JSON: {"body":{"dataB64":"aGVsbG8=","pid":42},"id":8,"kind":"req","type":"spawn.stdin","v":2}
+Hex (91 bytes): 000000577b22626f6479223a7b2264617461423634223a22614756736247383d222c22706964223a34327d2c226964223a382c226b696e64223a22726571222c2274797065223a22737061776e2e737464696e222c2276223a327d
+Frame size incl. 4-byte prefix: 91 bytes
+
+== spawn.stdin.res ==
+Payload JSON: {"body":{"ok":true,"window":65536},"id":8,"kind":"res","type":"spawn.stdin","v":2}
+Hex (86 bytes): 000000527b22626f6479223a7b226f6b223a747275652c2277696e646f77223a36353533367d2c226964223a382c226b696e64223a22726573222c2274797065223a22737061776e2e737464696e222c2276223a327d
+Frame size incl. 4-byte prefix: 86 bytes

@@ -2,6 +2,7 @@ import SwiftUI
 import TermXCore
 import TermXFiles
 import TermXUI
+import TetherSessionCore
 
 @main
 struct TetherApp: App {
@@ -15,6 +16,9 @@ struct TetherApp: App {
 final class AppModel: ObservableObject {
     let workspaces = WorkspaceStore()
     let integration = TermXIntegration()
+    /// Scrollback snapshots persisted per workspace, so a force-quit does not
+    /// lose the last screen of output.
+    let scrollback = ScrollbackStore()
     lazy var engine: CoreEngineAdapter = CoreEngineAdapter(core: integration.makePrimaryEngine())
     @Published var selected: Workspace?
     @Published var theme: TerminalTheme = .midnight
@@ -163,13 +167,16 @@ struct WorkspaceView: View {
     @State private var showStorage = false
     @State private var showLicenses = false
     @State private var didTearDown = false
+    /// One lifecycle state machine per session, plus the services it drives.
+    @State private var lifecycle: SessionCommandRunner?
+    @State private var lifecycleServices: WorkspaceSessionServices?
+    @State private var lifecycleFailure: SessionFailure?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
             if let session {
-                TerminalSessionView(session: session, theme: $model.theme) { force in
-                    model.integration.interruptActiveRuntimes(forceNodeSignal: force)
-                }
+                TerminalSessionView(session: session, theme: $model.theme)
             } else if openFailed {
                 workspaceErrorView(
                     title: "Can't reopen this folder",
@@ -252,6 +259,28 @@ struct WorkspaceView: View {
             }
         }
         .task(id: openAttempt) { await openIfNeeded() }
+        .onChange(of: scenePhase) { phase in
+            // Backgrounding is only meaningful once the shell is live; the
+            // machine documents that suspending earlier would misplace state.
+            switch phase {
+            case .background:
+                if lifecycle?.phase == .active { lifecycle?.send(.appBackgrounded) }
+            case .active:
+                if lifecycle?.phase == .suspended {
+                    lifecycle?.send(.appForegrounded)
+                    // Re-check the workspace here: a bookmark can go stale while
+                    // suspended, and the machine defers that event until now.
+                    if resolvedPath != nil, !model.workspaces.isStillAvailable(workspace) {
+                        lifecycle?.send(.workspaceBecameUnavailable)
+                    }
+                }
+            default:
+                break
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tetherLinuxRootfsRemoved)) { _ in
+            lifecycle?.send(.rootfsRemovedExternally)
+        }
         .onDisappear {
             // Only tear down when leaving the workspace entirely — not when a
             // sheet (Storage / Files / Licenses) covers this view. Tearing down
@@ -307,21 +336,68 @@ struct WorkspaceView: View {
         }
         resolvedPath = path
         didTearDown = false
+
+        // One lifecycle machine per session. It owns bootstrap -> shell ->
+        // teardown ordering; this view only supplies the services and events.
+        let services = WorkspaceSessionServices(
+            workspaceID: workspace.id.uuidString,
+            integration: model.integration,
+            scrollback: model.scrollback,
+            startShell: { completion in completion(.success(())) },
+            releaseScope: { [workspace, model] in model.workspaces.endAccess(workspace) },
+            presentFailure: { failure in
+                lifecycleFailure = failure
+                startFailed = true
+                startError = Self.describe(failure)
+            }
+        )
+        let runner = SessionCommandRunner(services: services)
+        lifecycleServices = services
+        lifecycle = runner
+
         let newSession = TerminalSession(cwd: path, engine: model.engine)
         do {
             try newSession.start()
         } catch {
+            lifecycle = nil
+            lifecycleServices = nil
             model.workspaces.endAccess(workspace)
             resolvedPath = nil
             startFailed = true
             startError = error.localizedDescription
             return
         }
+        services.session = newSession
+        // A snapshot taken mid-TUI must end with the sequence that returns the
+        // terminal to a sane state, or a restore would replay into a dead
+        // alternate screen.
+        services.modeStateProvider = { [weak newSession] in
+            newSession?.terminalRestoreProvider?() ?? Data()
+        }
+        newSession.onShellExited = { [weak runner] code in
+            runner?.send(.shellExited(code: code))
+        }
+        // The shell is already running by the time the machine is driven, so
+        // walk it to `.active` with the outcomes that actually happened rather
+        // than re-running the work.
+        runner.send(.workspaceOpened)
+        runner.send(.bootstrapSucceeded)
+        runner.send(.shellStarted)
         guard !Task.isCancelled, model.selected?.id == workspace.id else {
             newSession.terminate()
             model.workspaces.endAccess(workspace)
             resolvedPath = nil
             return
+        }
+        // A host-proxied job that dies mid-TUI leaves the terminal wedged;
+        // route its completion to the session so the view layer repairs it.
+        model.integration.onHostJobFinished = { [weak newSession] code in
+            newSession?.hostJobFinished(code: code)
+        }
+        // Host-run jobs live outside the guest's controlling terminal, so the
+        // kernel never signals them on resize. Push the size down explicitly.
+        newSession.onResize = { [weak model] cols, rows in
+            model?.integration.resizeActiveRuntimes(cols: cols, rows: rows)
         }
         session = newSession
         #if DEBUG
@@ -379,15 +455,40 @@ struct WorkspaceView: View {
         guard !didTearDown else { return }
         didTearDown = true
         model.integration.interruptActiveRuntimes()
+        model.integration.onHostJobFinished = nil
         let stopping = session
         session = nil
-        // terminate() only requests guest shutdown and schedules PTY closing; it
-        // never waits on the main thread. Request it before releasing the iOS
-        // security scope so the guest cannot race a revoked workspace mount.
-        stopping?.terminate()
-        if resolvedPath != nil {
-            model.workspaces.endAccess(workspace)
+
+        if let lifecycle {
+            // The machine emits the ordered sequence: signal the shell, wait
+            // for the engine, stop the reader, close the PTY, release the
+            // scope. Executing it in that order is what keeps the PTY from
+            // being closed under a thread still blocked reading it.
+            lifecycle.send(.userRequestedClose)
+            lifecycle.send(.teardownFinished)
+            self.lifecycle = nil
+            lifecycleServices = nil
+        } else {
+            stopping?.terminate()
+            if resolvedPath != nil {
+                model.workspaces.endAccess(workspace)
+            }
         }
         resolvedPath = nil
+    }
+
+    private static func describe(_ failure: SessionFailure) -> String {
+        switch failure {
+        case .bootstrapFailed(let message):
+            return "Linux setup failed: \(message)"
+        case .engineCrashed(let code):
+            return "The shell exited unexpectedly (code \(code))."
+        case .ptyError(let message):
+            return "The terminal could not be opened: \(message)"
+        case .workspaceUnavailable:
+            return "This folder is no longer available. Pick it again with Add Folder."
+        case .rootfsRemoved:
+            return "Linux data was deleted while this session was open. Reopen to set it up again."
+        }
     }
 }

@@ -3,6 +3,17 @@ import TermXFiles
 @testable import TermXNode
 
 final class NodeSpawnBridgeTests: XCTestCase {
+    /// Opener names come from `GuestDispatchManifest` at app startup, so a
+    /// test that exercises opener interception has to install them the same
+    /// way the host does.
+    override func setUp() {
+        super.setUp()
+        SystemOpen.configureOpenerCommands([
+            "open", "xdg-open", "gnome-open", "kde-open",
+            "sensible-browser", "wslview",
+        ])
+    }
+
     func testSpawnSyncOpenDoesNotHitExecutor() throws {
         let recorder = RecordingSpawnExecutor()
         let bridge = NodeSpawnBridge(executor: recorder) { target, origin in
@@ -66,7 +77,12 @@ final class NodeSpawnBridgeTests: XCTestCase {
         XCTAssertEqual(executor.records.last?.file, "future-package-command")
     }
 
-    func testWhichOpenReturnsInstalledGuestLauncherPath() throws {
+    /// `which` used to be intercepted: for any name in the opener list the
+    /// bridge fabricated `/usr/local/bin/<name>` without consulting anything.
+    /// That made `which` lie — it answered for launchers that were never
+    /// installed, and only for the hardcoded names. Resolution now goes to the
+    /// executor, which owns the real PATH.
+    func testWhichIsNotSpecialCasedAndReachesTheRealResolver() throws {
         let recorder = RecordingSpawnExecutor()
         let bridge = NodeSpawnBridge(executor: recorder)
         let req: [String: Any] = [
@@ -75,16 +91,14 @@ final class NodeSpawnBridgeTests: XCTestCase {
             "args": ["open"],
         ]
         let data = try JSONSerialization.data(withJSONObject: req)
-        let replyData = bridge.handle(
+        _ = bridge.handle(
             requestData: data,
             stdinFD: -1, stdoutFD: -1, stderrFD: -1,
             defaultCWD: "/work", defaultEnv: [:], interactive: true
         )
-        let line = String(data: replyData.dropLast(), encoding: .utf8)!
-        let reply = try JSONSerialization.jsonObject(with: Data(line.utf8)) as! [String: Any]
-        XCTAssertEqual(reply["exitCode"] as? Int, 0)
-        XCTAssertEqual((reply["stdout"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), "/usr/local/bin/open")
-        XCTAssertTrue(recorder.records.isEmpty)
+        XCTAssertEqual(recorder.records.count, 1, "which must be executed, not answered from a name list")
+        XCTAssertEqual(recorder.records.first?.file, "which")
+        XCTAssertEqual(recorder.records.first?.args, ["open"])
     }
 
     func testExit127UsesNodeENOENTContract() throws {

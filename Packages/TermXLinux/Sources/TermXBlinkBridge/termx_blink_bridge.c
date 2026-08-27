@@ -62,9 +62,19 @@ static pthread_t g_host_exec_thread;
 static pthread_mutex_t g_host_exec_client_mu = PTHREAD_MUTEX_INITIALIZER;
 static bool g_host_exec_worker_started;
 
-#define TERMX_DISPATCH_MAX 64
-static char g_dispatch_names[TERMX_DISPATCH_MAX][64];
+/* Host-dispatch name table.
+ *
+ * This is not a fixed policy list: it holds every command the host can run,
+ * which includes each CLI the user has installed into a runtime's global bin
+ * directory (`npm install -g <anything>`). It therefore grows at runtime and
+ * is rebuilt while the guest is live, so it needs both a lock and room to
+ * grow — the previous fixed 64-slot array silently dropped everything past
+ * the cap and raced with the exec path that reads it. */
+#define TERMX_DISPATCH_NAME_MAX 64
+static char (*g_dispatch_names)[TERMX_DISPATCH_NAME_MAX];
 static int g_dispatch_count;
+static int g_dispatch_capacity;
+static pthread_mutex_t g_dispatch_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static const char *prog_basename(const char *prog) {
   const char *base;
@@ -74,29 +84,52 @@ static const char *prog_basename(const char *prog) {
 }
 
 void termx_blink_dispatch_reset(void) {
+  pthread_mutex_lock(&g_dispatch_mu);
   g_dispatch_count = 0;
+  pthread_mutex_unlock(&g_dispatch_mu);
 }
 
 int termx_blink_dispatch_add(const char *basename) {
   int i;
+  int rc = 0;
   if (!basename || !basename[0]) return -1;
+  if (strlen(basename) >= TERMX_DISPATCH_NAME_MAX) return -1;
+
+  pthread_mutex_lock(&g_dispatch_mu);
   for (i = 0; i < g_dispatch_count; ++i) {
-    if (strcmp(g_dispatch_names[i], basename) == 0) return 0;
+    if (strcmp(g_dispatch_names[i], basename) == 0) {
+      pthread_mutex_unlock(&g_dispatch_mu);
+      return 0;
+    }
   }
-  if (g_dispatch_count >= TERMX_DISPATCH_MAX) return -1;
-  if (strlen(basename) >= sizeof(g_dispatch_names[0])) return -1;
+  if (g_dispatch_count >= g_dispatch_capacity) {
+    int next = g_dispatch_capacity ? g_dispatch_capacity * 2 : 64;
+    void *grown = realloc(g_dispatch_names,
+                          (size_t)next * TERMX_DISPATCH_NAME_MAX);
+    if (!grown) {
+      pthread_mutex_unlock(&g_dispatch_mu);
+      return -1;
+    }
+    g_dispatch_names = grown;
+    g_dispatch_capacity = next;
+  }
   strcpy(g_dispatch_names[g_dispatch_count++], basename);
-  return 0;
+  rc = 0;
+  pthread_mutex_unlock(&g_dispatch_mu);
+  return rc;
 }
 
 int termx_blink_dispatch_should_proxy(const char *prog) {
   const char *base = prog_basename(prog);
   int i;
+  int found = 0;
   if (!base) return 0;
+  pthread_mutex_lock(&g_dispatch_mu);
   for (i = 0; i < g_dispatch_count; ++i) {
-    if (strcmp(g_dispatch_names[i], base) == 0) return 1;
+    if (strcmp(g_dispatch_names[i], base) == 0) { found = 1; break; }
   }
-  return 0;
+  pthread_mutex_unlock(&g_dispatch_mu);
+  return found;
 }
 
 #define TERMX_HOST_EXEC_MAGIC 0x54584D48u /* TXMH */

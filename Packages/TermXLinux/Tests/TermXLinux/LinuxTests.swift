@@ -42,6 +42,28 @@ final class LinuxTests: XCTestCase {
         XCTAssertNil(env["EMAIL"])
     }
 
+    func testGuestEnvironmentIncludesWindowSizeWhenProvided() {
+        let env = LinuxEnvironment.guestEnviron(cwd: "/work", interactive: true, cols: 48, rows: 34)
+        XCTAssertEqual(env["COLUMNS"], "48")
+        XCTAssertEqual(env["LINES"], "34")
+    }
+
+    func testInvalidateRootfsWhenBusyboxMissing() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let rootfs = tmp.appendingPathComponent("rootfs")
+        try FileManager.default.createDirectory(at: rootfs, withIntermediateDirectories: true)
+        let service = BlinkLinuxService(
+            rootfs: rootfs,
+            workspacesHostRoot: tmp.appendingPathComponent("workspaces")
+        )
+        // Simulate a previously ready service whose Storage entry was deleted.
+        try Data("ok".utf8).write(to: rootfs.appendingPathComponent(".tether-bootstrapped"))
+        service.markNeedsBootstrap()
+        XCTAssertEqual(service.state, .needsBootstrap)
+        XCTAssertFalse(service.hasRootfs)
+    }
+
     func testRegistryManifest() {
         XCTAssertEqual(BlinkLinuxService().registryEntry["name"], "linux")
         XCTAssertEqual(BlinkLinuxService().registryEntry["kind"], "linux")
@@ -92,6 +114,19 @@ final class LinuxTests: XCTestCase {
         XCTAssertEqual(
             try String(contentsOf: bin.appendingPathComponent("custom"), encoding: .utf8),
             "user-owned-command"
+        )
+    }
+
+    func testAlpineBootstrapSkipsOnlyWhenBusyboxPresent() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tether-bootstrap-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("ok".utf8).write(to: root.appendingPathComponent(".tether-bootstrapped"))
+        // Marker alone must not count as bootstrapped — Storage can leave a marker-less empty dir,
+        // or delete busybox while leaving the marker.
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: root.appendingPathComponent("bin/busybox").path)
         )
     }
 }

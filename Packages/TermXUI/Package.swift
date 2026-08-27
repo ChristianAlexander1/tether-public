@@ -11,6 +11,7 @@ let package = Package(
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
         .package(path: "../TermXFiles"),
         .package(path: "../../External/TetherTerminal"),
+        .package(path: "../../External/TetherVTEngine"),
     ],
     targets: [
         .target(
@@ -18,6 +19,7 @@ let package = Package(
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "TermXFiles", package: "TermXFiles"),
+                .product(name: "TetherVTEngine", package: "TetherVTEngine"),
             ],
             path: "Sources/TermXUI",
             resources: [.process("Resources")]

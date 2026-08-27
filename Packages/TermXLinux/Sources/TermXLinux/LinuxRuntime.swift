@@ -97,7 +97,12 @@ final class EmbeddedBlinkRuntime: LinuxRuntime {
 
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                var env = LinuxEnvironment.guestEnviron(cwd: cwd, interactive: interactive)
+                let size = LinuxEnvironment.windowSize(fd: stdoutFD)
+                    ?? LinuxEnvironment.windowSize(fd: stdinFD)
+                var env = LinuxEnvironment.guestEnviron(
+                    cwd: cwd, interactive: interactive,
+                    cols: size?.cols, rows: size?.rows
+                )
                 let envp = LinuxEnvironment.cEnvp(&env)
                 let argp = LinuxEnvironment.cArgv(argv)
 
@@ -257,11 +262,11 @@ final class HostBlinkRuntime: LinuxRuntime, @unchecked Sendable {
 #endif
 
 enum LinuxEnvironment {
-    static func guestEnviron(cwd: String, interactive: Bool) -> [String: String] {
+    static func guestEnviron(cwd: String, interactive: Bool, cols: Int? = nil, rows: Int? = nil) -> [String: String] {
         // Prefer /work when that is the Docker-style project mount.
         let pwd = (cwd == "/work" || cwd.hasPrefix("/work/")) ? cwd
             : (cwd.hasPrefix("/") ? cwd : "/work")
-        let env: [String: String] = [
+        var env: [String: String] = [
             "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "HOME": "/root",
             "USER": "root",
@@ -269,6 +274,10 @@ enum LinuxEnvironment {
             "SHELL": "/bin/sh",
             "TMPDIR": "/tmp",
             "TERM": interactive ? "xterm-256color" : "dumb",
+            // SwiftTerm renders 24-bit colour, so guest programs that probe
+            // COLORTERM rather than terminfo get the truth. This is the same
+            // value the TJIP handshake reports to host-run Node jobs.
+            "COLORTERM": interactive ? "truecolor" : "",
             "LANG": "C.UTF-8",
             "PWD": pwd,
             // Generic desktop-integration contract used by any guest program.
@@ -276,7 +285,27 @@ enum LinuxEnvironment {
             "WAYLAND_DISPLAY": "tether",
             "BROWSER": "open",
         ]
+        if env["COLORTERM"]?.isEmpty == true { env.removeValue(forKey: "COLORTERM") }
+        if let cols, cols > 0 { env["COLUMNS"] = String(cols) }
+        if let rows, rows > 0 { env["LINES"] = String(rows) }
         return env
+    }
+
+    /// Read the PTY window size from a stdio fd (master or slave).
+    static func windowSize(fd: Int32) -> (cols: Int, rows: Int)? {
+        guard fd >= 0 else { return nil }
+        var size = winsize()
+        guard ioctl(fd, TIOCGWINSZ, &size) == 0 else { return nil }
+        let cols = Int(size.ws_col)
+        let rows = Int(size.ws_row)
+        guard cols > 0, rows > 0 else { return nil }
+        return (cols, rows)
+    }
+
+    static func applyWindowSize(to env: inout [String: String], fd: Int32) {
+        guard let size = windowSize(fd: fd) else { return }
+        env["COLUMNS"] = String(size.cols)
+        env["LINES"] = String(size.rows)
     }
 
     static func cArgv(_ argv: [String]) -> [UnsafeMutablePointer<CChar>?] {

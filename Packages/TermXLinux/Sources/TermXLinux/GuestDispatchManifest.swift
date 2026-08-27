@@ -97,3 +97,26 @@ enum GuestRuntimeLauncherInstaller {
         }
     }
 }
+
+/// Standard busybox applets commonly expected on a Linux terminal (clear, etc.).
+/// Only adds a symlink when the applet is not already on PATH — same as `apk add` would.
+enum GuestBusyboxApplets {
+    static let applets = ["clear"]
+
+    static func installMissing(in rootfs: URL) throws {
+        let fm = FileManager.default
+        let busybox = rootfs.appendingPathComponent("bin/busybox").path
+        guard fm.fileExists(atPath: busybox) else { return }
+        let destinationDirectory = rootfs.appendingPathComponent("usr/local/bin", isDirectory: true)
+        try fm.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+
+        for name in applets {
+            if LinuxFallback.guestCommandPath(name: name, rootfs: rootfs) != nil { continue }
+            let destination = destinationDirectory.appendingPathComponent(name).path
+            try fm.createSymbolicLink(
+                atPath: destination,
+                withDestinationPath: "../../../bin/busybox"
+            )
+        }
+    }
+}

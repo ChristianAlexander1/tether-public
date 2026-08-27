@@ -74,7 +74,11 @@ packageTargets += [
     ),
     .target(
         name: "TermXLinux",
-        dependencies: ["TermXCore", "TermXBlinkBridge"],
+        dependencies: [
+            "TermXCore",
+            "TermXBlinkBridge",
+            .product(name: "TetherStorageCore", package: "TetherStorageCore"),
+        ],
         resources: [
             .process("Resources"),
         ]
@@ -93,6 +97,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../TermXCore"),
+        .package(path: "../../External/TetherStorageCore"),
     ],
     targets: packageTargets
 )

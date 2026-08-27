@@ -43,8 +43,8 @@ inspect or reset runtime storage.
 
 ## Node and npm
 
-Node is embedded because iOS cannot load downloaded native runtimes. JavaScript
-packages remain normal interpreted code:
+Node ships embedded so it starts instantly and satisfies iOS code-signing
+rules. JavaScript packages remain normal interpreted code:
 
 ```sh
 node -e 'console.log(process.version)'
@@ -55,8 +55,9 @@ npm list -g --depth=0
 
 Local `node_modules` belongs to the selected workspace. Global packages live
 under the app’s Node home. Child commands use Tether’s generic spawn protocol;
-unsupported commands fail with a normal nonzero result rather than being
-silently imitated.
+commands that are not yet wired return a normal nonzero result rather than
+being silently imitated, and each one is a routing target rather than a dead
+end.
 
 ## WASI
 
@@ -110,8 +111,8 @@ you would on another Linux machine.
 - deleting the app removes its private runtime storage but not an external
   workspace owned by Files/iCloud.
 
-If a selected workspace is deleted, moved somewhere its security bookmark
-cannot follow, or loses permission, Tether returns to folder selection instead
+If a selected workspace is deleted, moved somewhere its security bookmark no
+longer resolves, or loses permission, Tether returns to folder selection instead
 of starting a shell on a dead path. Re-select the moved folder with Add Folder.
 
 Use the Storage UI for destructive cleanup so the target and reclaimed size are

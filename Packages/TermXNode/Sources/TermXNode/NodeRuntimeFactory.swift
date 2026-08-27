@@ -29,6 +29,14 @@ protocol NodeRuntime: AnyObject {
     func interrupt()
     /// Cooperative cancel for interactive jobs (avoids pthread_kill on NodeMobile).
     func requestCancel()
+    /// Push a new terminal geometry into the running job. On the TJIP/2 lane
+    /// this becomes a real `SIGWINCH` inside Node.
+    func resize(cols: Int, rows: Int)
+    /// Deliver a named signal to the running job without tearing anything
+    /// down. On the TJIP/2 lane this is a real signal event inside Node
+    /// (Ctrl-C on a TUI → the program decides how to exit); elsewhere it is a
+    /// best-effort equivalent.
+    func signalActiveJob(_ name: String)
 }
 
 enum NodeRuntimeFactory {

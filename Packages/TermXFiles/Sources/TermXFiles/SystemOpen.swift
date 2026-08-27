@@ -13,11 +13,21 @@ import AppKit
 /// - local file / directory → QuickLook / share sheet when a presenter exists,
 ///   otherwise the OS default handler as a best-effort fallback
 public enum SystemOpen {
-    /// Commands that mean “open this resource with the OS default handler”.
-    public static let openerCommands: Set<String> = [
-        "open", "xdg-open", "gnome-open", "kde-open",
-        "sensible-browser", "wslview",
-    ]
+    /// Commands that mean "open this resource with the OS default handler".
+    ///
+    /// Configured once at startup from `GuestDispatchManifest`, the repo's one
+    /// dispatch policy file. This used to be a second hardcoded copy of that
+    /// list (a third lived in the Bun shim), so the three could drift and a
+    /// name added to the manifest silently did nothing here.
+    ///
+    /// TermXFiles cannot import TermXLinux without inverting the layering, so
+    /// the manifest is pushed in rather than pulled.
+    public private(set) static var openerCommands: Set<String> = []
+
+    /// Install the opener names from the dispatch manifest. Idempotent.
+    public static func configureOpenerCommands(_ names: [String]) {
+        openerCommands = Set(names.map { $0.lowercased() })
+    }
 
     /// Where the open request originated — guest Alpine localhost ≠ iOS localhost.
     public enum OpenOrigin: Equatable, Sendable {

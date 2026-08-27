@@ -20,6 +20,10 @@ packages:
     path: Packages/TermXLinux
   TetherWasm:
     path: External/TetherWasm
+  TetherSessionCore:
+    path: External/TetherSessionCore
+  TetherStorageCore:
+    path: External/TetherStorageCore
 targets:
   Tether:
     type: application
@@ -29,8 +33,13 @@ targets:
       - path: App/LicensesView.swift
       - path: App/StorageView.swift
       - path: App/WorkspaceFilesView.swift
+      - path: App/WorkspaceSessionServices.swift
       - path: App/IntegrationSource/TermXIntegration.swift
       - path: App/IntegrationSource/TetherWasmService.swift
+      - path: App/IntegrationSource/SessionCommandRunner.swift
+      - path: App/IntegrationSource/ScrollbackStore.swift
+      - path: App/IntegrationSource/AppContainerFileSystem.swift
+      - path: App/IntegrationSource/TetherStorage.swift
       - path: App/Resources
         optional: true
         buildPhase: resources
@@ -54,6 +63,8 @@ targets:
       - package: TermXClaude
       - package: TermXLinux
       - package: TetherWasm
+      - package: TetherSessionCore
+      - package: TetherStorageCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tether.app

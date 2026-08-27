@@ -3,6 +3,7 @@ import Foundation
 import Darwin
 #endif
 import TermXCore
+import TetherJobControl
 
 // MARK: - Node runtime protocol
 
@@ -11,6 +12,8 @@ public protocol NodeService: AnyObject {
              stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
              interactive: Bool) async -> Int32
     func interrupt(forceNodeSignal: Bool)
+    /// Terminal geometry changed; forward it to a running job.
+    func resize(cols: Int, rows: Int)
 }
 
 // MARK: - Spawn bridge consumed by @tether/shim IPC
@@ -50,14 +53,43 @@ public final class RegistrySpawnExecutor: SpawnExecuting {
     private static let sharedEngine = TermXCommandEngine()
     private let engine: TermXCommandEngine
 
+    /// Job identity and signal routing. Ids handed out here are `JobID`s, so a
+    /// signal aimed at one can actually be routed — the previous counter
+    /// (`VirtualChildPID`) produced numbers nothing could act on, which is why
+    /// `signal` was a silent no-op.
+    private let backend = LaneSignalBackend()
+    private let jobs: TetherJobControl.JobTable
+    private let jobsLock = NSLock()
+
+    /// Delivers a signal to whichever runtime lane is executing the job.
+    /// Injected by the integration, which is the only layer that knows which
+    /// lanes exist; kept generic so no command name appears here.
+    public var laneSignalHandler: ((Int32, Int32) -> Bool)? {
+        get { backend.handler }
+        set { backend.handler = newValue }
+    }
+
     public init(engine: TermXCommandEngine? = nil) {
         self.engine = engine ?? Self.sharedEngine
+        self.jobs = TetherJobControl.JobTable(backend: backend, clock: DispatchJobClock())
     }
 
     public func spawnSync(file: String, args: [String], cwd: String, env: [String: String],
                           stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
                           interactive: Bool) -> SpawnResult {
-        let pid = VirtualChildPID.next()
+        jobsLock.lock()
+        let id = jobs.register(
+            TetherJobControl.JobSpec(argv: [file] + args, group: nil, isForegroundCandidate: interactive)
+        )
+        jobs.markRunning(id)
+        jobsLock.unlock()
+        let pid = id.raw
+        defer {
+            jobsLock.lock()
+            jobs.markExited(id, code: nil, signal: nil)
+            _ = jobs.reapExited()
+            jobsLock.unlock()
+        }
         var capturedOut = ""
         var capturedErr = ""
         let writeOut: (String) -> Void = { text in
@@ -79,9 +111,30 @@ public final class RegistrySpawnExecutor: SpawnExecuting {
         return SpawnResult(pid: pid, exitCode: code, stdout: capturedOut, stderr: capturedErr)
     }
 
+    /// Route a signal to a live job. Unknown or already-finished pids are a
+    /// no-op, exactly as `kill(2)` reports `ESRCH`; a live one reaches the
+    /// runtime lane that is executing it.
     public func signal(pid: Int32, signal: Int32) {
-        _ = pid
-        _ = signal
+        jobsLock.lock()
+        defer { jobsLock.unlock() }
+        let id = TetherJobControl.JobID(raw: pid)
+        guard jobs.state(of: id) != nil else { return }
+        guard let name = Self.signalName(signal) else { return }
+        _ = jobs.signal(name, to: .job(id))
+    }
+
+    static func signalName(_ signal: Int32) -> TetherJobControl.JobSignal? {
+        switch signal {
+        case Int32(SIGINT): return .int
+        case Int32(SIGTERM): return .term
+        case Int32(SIGKILL): return .kill
+        case Int32(SIGHUP): return .hup
+        case Int32(SIGQUIT): return .quit
+        case Int32(SIGWINCH): return .winch
+        case Int32(SIGTSTP): return .tstp
+        case Int32(SIGCONT): return .cont
+        default: return nil
+        }
     }
 
     private static func writeFD(_ fd: Int32, _ text: String) -> Int {
@@ -191,7 +244,24 @@ public final class EmbeddedNodeService: NodeService, @unchecked Sendable {
             } else {
                 runtime.interrupt()
             }
+        } else {
+            // Graceful Ctrl-C on an interactive TUI: deliver a real SIGINT
+            // through the TJIP/2 session and let the program exit on its own
+            // terms (restore the screen, show the cursor). The cancel-wait in
+            // the runtime's reply loop is the backstop if it never does.
+            runtime.signalActiveJob("SIGINT")
         }
+    }
+
+    /// Forward a terminal resize to the job currently running, if any.
+    /// Without this a Node TUI never learns the window changed — the v1 lane
+    /// had it poll for its own size, which is why rotation did not reflow.
+    public func resize(cols: Int, rows: Int) {
+        lock.lock()
+        let hasJob = currentJob != nil
+        lock.unlock()
+        guard hasJob else { return }
+        runtime.resize(cols: cols, rows: rows)
     }
 
     private static func isNpmVersionProbe(_ argv: [String]) -> Bool {
@@ -230,7 +300,20 @@ public enum NodeShim {
     }
 
     public static var preloadPath: String? {
-        bundleDirectory?.appendingPathComponent("index.js").path
+        bundleDirectory?.appendingPathComponent(useIPCv2 ? "index.v2.js" : "index.js").path
+    }
+
+    /// Selects the TJIP/2 IPC server and the v2 shim.
+    ///
+    /// v1 answered `isTTY` from `TETHER_INTERACTIVE`, hardcoded colour depth
+    /// to 8, and polled for the window size, so no Node TUI ever received a
+    /// real `SIGWINCH`. v2 derives all of it from the handshake and pushes
+    /// resize events. Opt-in via `TETHER_IPC_V2=1` until the physical-device
+    /// matrix in `docs/rework-plan/90-INTEGRATION-GLUE.md` passes — simulator
+    /// verification alone does not clear that bar.
+    public static var useIPCv2: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return (environment["TETHER_IPC_V2"] ?? "0") == "1"
     }
 
     public static var bootstrapPath: String? {
@@ -256,9 +339,17 @@ public enum NodeEnvironment {
         env["TERM"] = env["TERM"] ?? "xterm-256color"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
         env["PWD"] = cwd
-        let interactiveValue = interactive ? "1" : (env["TETHER_INTERACTIVE"] ?? env["TERMX_INTERACTIVE"] ?? "0")
-        env["TETHER_INTERACTIVE"] = interactiveValue
-        env["TERMX_INTERACTIVE"] = interactiveValue
+        if NodeShim.useIPCv2 {
+            // On the v2 lane TTY truth comes from the TJIP/2 handshake, which
+            // reports the fds that are genuinely PTY-bound. Leaving this flag
+            // in the environment would only invite something to consult it.
+            env.removeValue(forKey: "TETHER_INTERACTIVE")
+            env.removeValue(forKey: "TERMX_INTERACTIVE")
+        } else {
+            let interactiveValue = interactive ? "1" : (env["TETHER_INTERACTIVE"] ?? env["TERMX_INTERACTIVE"] ?? "0")
+            env["TETHER_INTERACTIVE"] = interactiveValue
+            env["TERMX_INTERACTIVE"] = interactiveValue
+        }
         // Quiet defaults for harness/CI; interactive terminal gets live npm output.
         env["npm_config_update_notifier"] = env["npm_config_update_notifier"] ?? "false"
         env["npm_config_fund"] = env["npm_config_fund"] ?? "false"
@@ -274,5 +365,34 @@ public enum NodeEnvironment {
         env["npm_config_fetch_retry_maxtimeout"] = env["npm_config_fetch_retry_maxtimeout"] ?? "20000"
         env["npm_config_maxsockets"] = env["npm_config_maxsockets"] ?? "8"
         return env
+    }
+}
+
+/// `JobBackend` for the registry lane. The registry itself runs commands
+/// in-process, so a signal is delivered by asking the runtime lane executing
+/// the job to interrupt — the integration supplies that handler.
+final class LaneSignalBackend: TetherJobControl.JobBackend {
+    var handler: ((Int32, Int32) -> Bool)?
+
+    func deliver(_ signal: TetherJobControl.JobSignal, to job: TetherJobControl.JobID) -> Bool {
+        guard let handler else { return false }
+        return handler(job.raw, Self.number(signal))
+    }
+
+    func forceTerminate(_ job: TetherJobControl.JobID) {
+        _ = handler?(job.raw, Int32(SIGKILL))
+    }
+
+    private static func number(_ signal: TetherJobControl.JobSignal) -> Int32 {
+        switch signal {
+        case .int: return Int32(SIGINT)
+        case .term: return Int32(SIGTERM)
+        case .kill: return Int32(SIGKILL)
+        case .hup: return Int32(SIGHUP)
+        case .quit: return Int32(SIGQUIT)
+        case .winch: return Int32(SIGWINCH)
+        case .tstp: return Int32(SIGTSTP)
+        case .cont: return Int32(SIGCONT)
+        }
     }
 }

@@ -63,4 +63,4 @@ The iOS linkage and full app graph are verified by:
 These are development overrides. Production iOS uses the packaged
 `Blink.xcframework`; missing production linkage is an error, not an emulated
 success path. Architectural constraints and device gates are maintained in
-`docs/LIMITATIONS.md` and `docs/DEVICE-PASS.md`.
+`docs/ENGINEERING-TARGETS.md` and `docs/DEVICE-PASS.md`.

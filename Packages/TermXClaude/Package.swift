@@ -14,7 +14,15 @@ let package = Package(
         .target(
             name: "TermXClaude",
             dependencies: ["TermXCore"],
-            resources: [.process("Resources")]
+            resources: [
+                // bun-compat is a CommonJS package: `.process` would flatten
+                // lib/ into the bundle root and break its internal requires.
+                .copy("Resources/bun-compat"),
+                .process("Resources/launcher.js"),
+                .process("Resources/bun-shim.js"),
+                .process("Resources/registry.json"),
+                .process("Resources/NOTICE-claude-bun-bridge.txt"),
+            ]
         ),
         .testTarget(
             name: "TermXClaudeTests",

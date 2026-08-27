@@ -18,8 +18,25 @@ public final class LinuxShellEngine: TerminalEngine {
     private var hostWorkspaceCwd: String = "/"
     private let dispatchManifest = GuestDispatchManifest.loadDefault()
 
+    /// Every command the host can run: the manifest's packaged runtimes plus
+    /// whatever the user has installed into a runtime's global bin directory.
+    /// Public so the app can consult it when dispatching and refresh it after
+    /// a job that may have installed something.
+    public let hostCommands: HostCommandRegistry
+
     public init(linux: BlinkLinuxService = BlinkLinuxService()) {
         self.linux = linux
+        self.hostCommands = HostCommandRegistry(manifest: GuestDispatchManifest.loadDefault())
+    }
+
+    /// Re-scan for newly installed commands and make them runnable from the
+    /// guest shell immediately — a new launcher in `/usr/local/bin` and a new
+    /// entry in the exec dispatch table. Safe to call while the shell is live;
+    /// that is the point, since `npm install -g` happens mid-session.
+    public func refreshHostCommands() {
+        guard hostCommands.refresh() else { return }
+        try? ensureHostRuntimeLaunchers()
+        registerDispatchNames()
     }
 
     public func startShell(cwd: String, env: [String: String],
@@ -71,6 +88,7 @@ public final class LinuxShellEngine: TerminalEngine {
         var bootstrapError: String?
         Task {
             do {
+                self.linux.invalidateIfRootfsMissing()
                 if self.linux.state != .ready {
                     try await self.linux.bootstrap()
                 }
@@ -135,6 +153,8 @@ public final class LinuxShellEngine: TerminalEngine {
             to: profileDir.appendingPathComponent("tether-guest.sh"),
             atomically: true, encoding: .utf8
         )
+        // Alpine minirootfs may omit applet symlinks; wire standard busybox applets only.
+        try GuestBusyboxApplets.installMissing(in: root)
     }
 
     /// Earlier development builds installed command-specific scripts and Git
@@ -162,6 +182,8 @@ public final class LinuxShellEngine: TerminalEngine {
                 $0.trimmingCharacters(in: .whitespacesAndNewlines)
                     == "127.0.0.1\tlocalhost tether\n::1\t\tlocalhost tether"
             }),
+            ("usr/local/bin/clear", { $0.contains("printf '\\033") }),
+            ("usr/local/bin/reset", { $0.contains("printf '\\033") }),
         ]
         for (relative, wasGeneratedByTether) in candidates {
             let url = root.appendingPathComponent(relative)
@@ -176,14 +198,27 @@ public final class LinuxShellEngine: TerminalEngine {
         // dispatches these manifest names before loading BusyBox; the link is
         // only the executable PATH entry required by Linux exec resolution.
         try GuestRuntimeLauncherInstaller.install(
-            names: dispatchManifest.launcherBasenames,
+            names: hostCommands.launcherNames,
             rootfs: linux.rootfs
         )
     }
 
+    /// Push the current command set into the guest exec hook.
+    private func registerDispatchNames() {
+#if canImport(TermXBlinkBridge)
+        termx_blink_dispatch_reset()
+        for name in hostCommands.launcherNames {
+            _ = name.withCString { termx_blink_dispatch_add($0) }
+        }
+#endif
+    }
+
     private func installHostExecBridge() {
 #if canImport(TermXBlinkBridge)
-        dispatchManifest.installIntoBlinkBridge()
+        // Scan before registering so commands installed in an earlier session
+        // are runnable from the first prompt of this one.
+        hostCommands.refresh()
+        registerDispatchNames()
         let box = Unmanaged.passUnretained(self)
         termx_blink_set_host_exec({ prog, argv, envp, stdinFD, stdoutFD, stderrFD, exitOut, ctx in
             guard let ctx else { return -1 }
@@ -229,6 +264,12 @@ public final class LinuxShellEngine: TerminalEngine {
         env["TERMX_HOST_CWD"] = hostWorkspaceCwd
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
         env["HOME"] = docs
+        // Host-proxied TUIs (any interactive Node/CLI) need the live PTY size —
+        // without COLUMNS/LINES they default to 80×24 and smash a narrow phone terminal.
+        LinuxEnvironment.applyWindowSize(to: &env, fd: stdoutFD)
+        if env["COLUMNS"] == nil {
+            LinuxEnvironment.applyWindowSize(to: &env, fd: stdinFD)
+        }
         let name = URL(fileURLWithPath: String(cString: prog)).lastPathComponent
         if !args.isEmpty { args[0] = name }
         let code = hostExec(name, args, env, stdinFD, stdoutFD, stderrFD)

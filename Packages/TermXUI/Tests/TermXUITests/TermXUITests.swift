@@ -141,17 +141,24 @@ final class TermXUIAcceptanceTests: XCTestCase {
         wait(for: [escExpectation, ctrlExpectation], timeout: 3)
     }
 
-    func testDoubleCtrlCInvokesHardInterruptOnSecondTap() throws {
-        let hookExpectation = expectation(description: "second-ctrl-c")
+    func testDoubleCtrlCIsDeliveredAsBytesOnly() throws {
+        // Real terminals forward every ^C to the PTY; they do not host-kill on
+        // the second tap. Programs decide when to exit and restore the screen.
+        let first = expectation(description: "first-ctrl-c")
+        let second = expectation(description: "second-ctrl-c")
+        var count = 0
         let engine = RecordingEngine()
-        let session = TerminalSession(cwd: "/tmp", engine: engine, onInput: { _ in })
-        session.onHardInterrupt = { force in
-            if force { hookExpectation.fulfill() }
-        }
+        let session = TerminalSession(cwd: "/tmp", engine: engine, onInput: { data in
+            guard data == TerminalKey.ctrlC else { return }
+            count += 1
+            if count == 1 { first.fulfill() }
+            if count == 2 { second.fulfill() }
+        })
         _ = try session.start(ptySlave: 1)
         session.send(TerminalKey.ctrlC)
         session.send(TerminalKey.ctrlC)
-        wait(for: [hookExpectation], timeout: 3)
+        wait(for: [first, second], timeout: 3)
+        XCTAssertEqual(count, 2)
         XCTAssertTrue(engine.signals.isEmpty)
     }
 
@@ -166,6 +173,23 @@ final class TermXUIAcceptanceTests: XCTestCase {
         XCTAssertTrue(snapshot.contains("Hello vim"))
         XCTAssertTrue(snapshot.contains("-- INSERT --"))
         XCTAssertEqual(snapshot.split(separator: "\n").count, 24)
+    }
+
+    func testAlternateScreen1049RestoresPrimaryBufferAndScrollback() {
+        let terminal = SwiftTerm.Terminal(
+            delegate: NullTerminalDelegate(),
+            options: TerminalOptions(cols: 80, rows: 24, scrollback: 500)
+        )
+        terminal.feed(text: "primary history line\r\n")
+        terminal.feed(text: "\u{1B}[?1049h\u{1B}[2J\u{1B}[1;1Halt-only content\r\n")
+        XCTAssertTrue(terminal.isCurrentBufferAlternate)
+
+        terminal.feed(text: "\u{1B}[?1049l")
+        XCTAssertFalse(terminal.isCurrentBufferAlternate)
+
+        let snapshot = TerminalBufferSnapshot.capture(terminal)
+        XCTAssertTrue(snapshot.contains("primary history line"))
+        XCTAssertFalse(snapshot.contains("alt-only content"))
     }
 
     func testDeliveredTerminalAndRendererSurviveUnknownDECMode() {

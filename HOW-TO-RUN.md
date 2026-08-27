@@ -147,13 +147,32 @@ wasm module.wasm arg1 arg2
 - `TETHER_PTY_LOG=1` mirrors debug PTY bytes to the app-owned
   `Documents/.tether-pty.log`
 - `TETHER_HOST_SHELL=1` selects the host shell; Alpine is the product default
+- `TETHER_IPC_V2=1` selects the TJIP/2 lane for host-run Node jobs: per-fd
+  `isTTY` from the protocol handshake, real PTY geometry pushed on resize
+  (a genuine `SIGWINCH` inside Node), true colour depth, and working
+  `spawn.kill`. Still opt-in while the device matrix in
+  `docs/rework-plan/90-INTEGRATION-GLUE.md` is outstanding; the legacy lane is
+  the default until then.
 
 Legacy `TERMX_` aliases remain readable for existing automation, but new usage
 should use `TETHER_`.
+
+### Checking the TJIP/2 lane by hand
+
+```bash
+SIMCTL_CHILD_TETHER_UI_TEST_MODE=1 SIMCTL_CHILD_TETHER_AUTOWORKSPACE=1 \
+SIMCTL_CHILD_TETHER_PTY_LOG=1 SIMCTL_CHILD_TETHER_IPC_V2=1 \
+SIMCTL_CHILD_TETHER_AUTOCOMMANDS='node -e "console.log(process.stdout.columns, process.stdout.getColorDepth())"' \
+xcrun simctl launch 'iPhone 17 Pro' com.tether.app
+```
+
+Then read `Documents/.tether-pty.log` inside the app container
+(`xcrun simctl get_app_container 'iPhone 17 Pro' com.tether.app data`). The size
+must match the on-screen terminal, not 80x24, and the depth must be 24.
 
 ## Physical device
 
 Set a development signing team, select the iPhone/iPad destination, and build
 the same `Tether` scheme. Complete [docs/DEVICE-PASS.md](docs/DEVICE-PASS.md)
-before release; signed-device and account OAuth results cannot be inferred from
-a Simulator build.
+before release; confirm signed-device and account OAuth results on hardware in
+addition to the Simulator build.

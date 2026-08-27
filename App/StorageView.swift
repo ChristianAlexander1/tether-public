@@ -1,5 +1,6 @@
 import SwiftUI
 import TermXClaude
+import TetherStorageCore
 
 /// Shows what Tether is keeping on disk and lets the user reclaim it.
 /// Everything listed lives inside the app's own sandbox — the folders the user picked
@@ -130,13 +131,13 @@ final class StorageModel: ObservableObject {
                       warning: "Uninstalls Claude Code and its private runtime dependencies. Your workspace files and Claude settings are preserved; running claude later installs the current release again."),
             Candidate(id: "linux", name: "Linux packages", detail: "Alpine guest — apk add",
                       path: documents + "/linux", removable: true, cache: false,
-                      warning: "Removes every package installed with apk, including git. Tether re-downloads a fresh Alpine base the next time you use the linux command."),
+                      warning: "Removes the Alpine Linux guest (apk packages, clear/reset helpers, and node/npm/claude launchers). Open a new terminal afterward — Tether re-downloads Alpine and restores launchers automatically."),
             Candidate(id: "python", name: "Python packages", detail: "globally installed with pip",
                       path: documents + "/python", removable: true, cache: false,
                       warning: "Removes every package installed with pip. Python itself stays."),
             Candidate(id: "node", name: "Node packages", detail: "globally installed with npm -g",
                       path: documents + "/node", removable: true, cache: false,
-                      warning: "Removes globally installed npm packages. Node itself stays."),
+                      warning: "Removes globally installed npm packages. Node itself stays. Open a new terminal if npm commands look broken."),
             Candidate(id: "npm-cache", name: "npm cache", detail: "safe to delete",
                       path: documents + "/.npm", removable: true, cache: true,
                       warning: "Only cached downloads are removed; packages keep working."),
@@ -181,16 +182,71 @@ final class StorageModel: ObservableObject {
     }
 
     func clear(_ entry: StorageEntry) {
+        defer { measure() }
+
+        // Areas the catalog manages go through it, so a delete cannot pull the
+        // rootfs out from under a running shell. Cache-style entries that only
+        // need emptying (and iOS's temporary directory, which must keep
+        // existing) stay on the direct path.
+        guard let areaID = Self.managedAreaID(for: entry.id) else {
+            do {
+                try Self.remove(entry.path, preservingDirectory: entry.isCache)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            return
+        }
+
+        let catalog = TetherStorage.shared.catalog
         do {
+            let plan = try catalog.plan(delete: areaID)
+            guard plan.blockedBy.isEmpty else {
+                errorMessage = Self.blockedMessage(entry: entry, owners: plan.blockedBy)
+                return
+            }
+            // Claude keeps state outside its install root, so its uninstaller
+            // runs first; the catalog then removes what remains.
             if entry.id == "claude" {
                 try ClaudeInstallation.uninstall(home: documents)
-            } else {
-                try Self.remove(entry.path, preservingDirectory: entry.isCache)
             }
+            let actions = try catalog.execute(plan)
+            apply(actions)
         } catch {
             errorMessage = error.localizedDescription
         }
-        measure()
+    }
+
+    /// Post-delete actions the catalog reports, applied to the live services.
+    /// `markNeedsBootstrap` replaces the bare notification post: it says what
+    /// must happen rather than hoping an observer is listening.
+    private func apply(_ actions: [PostDeleteAction]) {
+        for action in actions {
+            switch action {
+            case .markNeedsBootstrap:
+                NotificationCenter.default.post(name: .tetherLinuxRootfsRemoved, object: nil)
+            case .invalidateRuntime, .none:
+                break
+            }
+        }
+    }
+
+    private static func managedAreaID(for entryID: String) -> ManagedAreaID? {
+        switch entryID {
+        case "linux": return .linuxRootfs
+        case "node": return .nodeHome
+        case "claude": return .claudeInstall
+        case "python": return .pythonPackages
+        default: return nil
+        }
+    }
+
+    private static func blockedMessage(entry: StorageEntry, owners: [ActiveUseToken]) -> String {
+        let who = owners.map(\.owner).joined(separator: ", ")
+        return """
+        \(entry.name) is in use by an open terminal session and was not deleted.
+
+        Close the workspace, then try again. (Held by: \(who))
+        """
     }
 
     func clearAllCaches() {
@@ -248,3 +304,4 @@ final class StorageModel: ObservableObject {
         return f.string(fromByteCount: bytes)
     }
 }
+

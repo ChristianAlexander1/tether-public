@@ -29,5 +29,5 @@ cd Packages/TermXNode && swift test
 ```
 
 NodeMobile.xcframework is produced by `Frameworks/build-nodejs-mobile.sh` and
-is ignored by Git. See `docs/ARCHITECTURE.md` and `docs/LIMITATIONS.md` for the
+is ignored by Git. See `docs/ARCHITECTURE.md` and `docs/ENGINEERING-TARGETS.md` for the
 guest/host boundary.

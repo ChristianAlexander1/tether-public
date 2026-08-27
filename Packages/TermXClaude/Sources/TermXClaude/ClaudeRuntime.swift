@@ -371,6 +371,16 @@ public enum ClaudeNodeInstaller {
             try? fm.removeItem(atPath: dest)
             try fm.copyItem(at: src, to: URL(fileURLWithPath: dest))
         }
+        // The Bun surface itself lives in `tether-bun-compat`; bun-shim.js
+        // requires it from ./bun-compat, so the library ships beside it.
+        if let compat = resourceDirectoryURL(named: "bun-compat") {
+            let dest = (root as NSString).appendingPathComponent("bun-compat")
+            try? fm.removeItem(atPath: dest)
+            try fm.copyItem(at: compat, to: URL(fileURLWithPath: dest))
+        } else {
+            throw InstallError.resourcesMissing
+        }
+
         // Remove the obsolete command-specific browser module installed by
         // earlier builds. The generic child-process opener now owns this path.
         let legacyOpenStub = (root as NSString).appendingPathComponent("termx-open-stub.js")
@@ -379,6 +389,20 @@ public enum ClaudeNodeInstaller {
             let dest = (root as NSString).appendingPathComponent("NOTICE-claude-bun-bridge.txt")
             try? fm.removeItem(atPath: dest)
             try? fm.copyItem(at: notice, to: URL(fileURLWithPath: dest))
+        }
+    }
+
+    /// Locate a directory shipped in the SPM resource bundle.
+    private static func resourceDirectoryURL(named name: String) -> URL? {
+        let candidates = [
+            Bundle.module.resourceURL?.appendingPathComponent(name),
+            Bundle.module.bundleURL.appendingPathComponent(name),
+            Bundle.module.bundleURL.appendingPathComponent("Resources/\(name)"),
+        ].compactMap { $0 }
+        return candidates.first { url in
+            var isDirectory: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            return exists && isDirectory.boolValue
         }
     }
 

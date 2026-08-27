@@ -88,15 +88,27 @@ public final class TerminalSession: ObservableObject, Identifiable {
     private let outputQueue = DispatchQueue(label: "com.termx.session.output", qos: .userInitiated)
     private var onInput: ((Data) -> Void)?
     private var onOutput: ((Data) -> Void)?
-    /// Second ^C within `ctrlCRepeatWindow` invokes this with `forceNodeSignal: true`
-    /// so embedded Node/Claude can exit (first ^C is PTY-only for Ink "press again").
-    public var onHardInterrupt: ((_ forceNodeSignal: Bool) -> Void)?
-    private var lastCtrlCAt: Date?
-    private let ctrlCLock = NSLock()
-    private static let ctrlCRepeatWindow: TimeInterval = 2.5
     private let readerLock = NSLock()
     private var readerShouldStop = false
     private var readerFinished: DispatchSemaphore?
+
+    /// Supplies the reset sequence a program owed the terminal when it left it
+    /// in a TUI mode (alternate screen, hidden cursor, mouse reporting). Wired
+    /// by the view layer to the output pipeline's mode tracker; it returns no
+    /// bytes when the terminal is already clean, so it is safe to ask on every
+    /// exit rather than guessing which ones were abnormal.
+    public var terminalRestoreProvider: (() -> Data)?
+
+    /// Ask for a repair sequence and, if there is one, deliver it through the
+    /// normal output path so it is both rendered and recorded.
+    private func restoreTerminalIfNeeded() {
+        guard let restore = terminalRestoreProvider?(), !restore.isEmpty else { return }
+        outputQueue.async { [weak self] in self?.deliverOutput(restore) }
+    }
+
+    /// Fired on the main queue when the guest shell exits, with its code.
+    /// The lifecycle state machine turns this into `.shellExited`.
+    public var onShellExited: ((Int32) -> Void)?
 
     public init(cwd: String, environment: [String: String] = TerminalSession.defaultEnvironment(), engine: TerminalEngine, onInput: ((Data) -> Void)? = nil, onOutput: ((Data) -> Void)? = nil) {
         self.cwd = cwd
@@ -133,8 +145,12 @@ public final class TerminalSession: ObservableObject, Identifiable {
                 guard let self else { return }
                 self.isRunning = false
                 self.pid = nil
+                // Repair first, so the exit notice lands on the primary screen
+                // instead of a dead alternate buffer.
+                self.restoreTerminalIfNeeded()
                 let notice = Data("\n[process exited with code \(code)]\n".utf8)
                 self.outputQueue.async { self.deliverOutput(notice) }
+                self.onShellExited?(code)
                 self.shutdownPTY()
             }
         }
@@ -144,32 +160,74 @@ public final class TerminalSession: ObservableObject, Identifiable {
     }
 
     public func send(_ data: Data) {
+        // Real terminals only forward keystrokes (including ^C) to the PTY.
+        // Programs handle single vs double Ctrl-C and emit their own teardown
+        // sequences (e.g. CSI ?1049l). Do not host-force-kill on repeated ^C.
+        mirrorInputLog(data)
         outputQueue.async { [weak self] in
-            guard let self else { return }
-            if Self.isHardInterrupt(data) {
-                let now = Date()
-                self.ctrlCLock.lock()
-                let isSecond = self.lastCtrlCAt.map { now.timeIntervalSince($0) <= Self.ctrlCRepeatWindow } ?? false
-                self.lastCtrlCAt = now
-                self.ctrlCLock.unlock()
-                if isSecond {
-                    self.onHardInterrupt?(true)
-                }
-            }
-            self.onInput?(data)
+            self?.onInput?(data)
         }
+    }
+
+    /// Records keystrokes heading into the PTY when `TETHER_PTY_LOG=1`.
+    /// Output-side logging alone cannot answer "did the key reach the
+    /// program?", which is the first question for any stuck-input report.
+    private func mirrorInputLog(_ data: Data) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment["TETHER_PTY_LOG"] == "1" else { return }
+        guard let docs = FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let url = docs.appendingPathComponent(".tether-input.log")
+        let hex = data.map { String(format: "%02x", $0) }.joined(separator: " ")
+        // The line-discipline state at the moment the key was sent. A program
+        // in raw mode receives 0x03 as a byte; in cooked mode the kernel
+        // echoes "^C" and raises SIGINT instead. This is what distinguishes
+        // "the key never arrived" from "the program was not in raw mode".
+        var mode = "termios=?"
+        if let master = pty?.master, master >= 0 {
+            var t = termios()
+            if tcgetattr(master, &t) == 0 {
+                let icanon = (t.c_lflag & tcflag_t(ICANON)) != 0
+                let echo = (t.c_lflag & tcflag_t(ECHO)) != 0
+                let isig = (t.c_lflag & tcflag_t(ISIG)) != 0
+                mode = "ICANON=\(icanon ? 1 : 0) ECHO=\(echo ? 1 : 0) ISIG=\(isig ? 1 : 0)"
+            }
+        }
+        let line = "\(Date().timeIntervalSince1970) in: \(hex) [\(mode)]\n"
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data(line.utf8))
+        #endif
     }
     public func send(_ text: String) { send(Data(text.utf8)) }
 
-    private static func isHardInterrupt(_ data: Data) -> Bool {
-        data == TerminalKey.ctrlC
-    }
+    /// Notified after every geometry change so host-proxied jobs — which do
+    /// not sit under the guest's controlling terminal and therefore never see
+    /// the kernel's SIGWINCH — can be told the new size.
+    public var onResize: ((Int, Int) -> Void)?
 
     public func resize(cols: Int, rows: Int) {
         self.cols = max(1, cols)
         self.rows = max(1, rows)
         pty?.resize(cols: self.cols, rows: self.rows)
         if let pid { engine.signal(pid: pid, SIGWINCH) }
+        onResize?(self.cols, self.rows)
+    }
+
+    /// Called when a host-proxied job (one run through `hostExec` rather than
+    /// as a guest process) finishes. The shell itself is still alive, so no
+    /// exit notice is emitted — but the job may have died mid-TUI and left the
+    /// terminal wedged, which is exactly what a real multiplexer repairs here.
+    public func hostJobFinished(code: Int32) {
+        if Thread.isMainThread {
+            restoreTerminalIfNeeded()
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.restoreTerminalIfNeeded() }
+        }
     }
 
     public func interrupt() { if let pid { engine.signal(pid: pid, SIGINT) } }
@@ -178,6 +236,57 @@ public final class TerminalSession: ObservableObject, Identifiable {
         isRunning = false
         pid = nil
         shutdownPTY()
+    }
+
+    // MARK: - Ordered teardown steps
+    //
+    // `terminate()` bundles signal + close for callers that just want the
+    // session gone. The lifecycle state machine needs the steps separately so
+    // it can enforce the ordering that matters: the reader must stop before the
+    // PTY descriptor is closed, because closing a descriptor a thread is
+    // blocked reading can crash the process.
+
+    /// Send the named signal to the guest shell without tearing anything down.
+    public func signalShell(_ name: String) {
+        guard let pid else { return }
+        switch name {
+        case "SIGINT": engine.signal(pid: pid, SIGINT)
+        case "SIGKILL": engine.signal(pid: pid, SIGKILL)
+        case "SIGHUP": engine.signal(pid: pid, SIGHUP)
+        default: engine.signal(pid: pid, SIGTERM)
+        }
+    }
+
+    /// Wait up to `graceMillis` for the engine to report exit, then continue
+    /// regardless. Never blocks longer than the grace period.
+    public func waitForEngineExit(graceMillis: Int) {
+        let deadline = Date().addingTimeInterval(Double(max(0, graceMillis)) / 1000)
+        while isRunning, Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
+        isRunning = false
+        pid = nil
+    }
+
+    /// Signal the PTY reader to stop and wait briefly for it to finish.
+    public func stopOutputPumpForTeardown() {
+        readerLock.lock()
+        readerShouldStop = true
+        let semaphore = readerFinished
+        readerLock.unlock()
+        if let semaphore {
+            _ = semaphore.wait(timeout: .now() + 0.5)
+        }
+    }
+
+    /// Close the PTY. Only legal after `stopOutputPumpForTeardown()`.
+    public func closePTYAfterReaderStops() {
+        readerLock.lock()
+        let pair = pty
+        pty = nil
+        readerFinished = nil
+        readerLock.unlock()
+        pair?.close()
     }
 
     // MARK: - Test transcript (temporary — remove after debugging)
@@ -215,6 +324,26 @@ public final class TerminalSession: ObservableObject, Identifiable {
     /// Test-only: inject bytes as if the PTY produced them.
     public func appendTranscriptForTesting(_ data: Data) {
         outputQueue.sync { appendTranscript(data) }
+    }
+
+    /// The tail of everything the PTY has produced, for a scrollback snapshot.
+    /// Recent output is what matters on restore, so the head is dropped.
+    public func recentOutputTail(maxBytes: Int) -> Data {
+        outputQueue.sync {
+            guard transcript.count > maxBytes else { return transcript }
+            return transcript.suffix(maxBytes)
+        }
+    }
+
+    /// Render bytes into the terminal as if the shell had produced them,
+    /// without recording them in the transcript. Used to replay a restored
+    /// scrollback snapshot; replaying into the transcript would make the next
+    /// snapshot contain a copy of the previous one.
+    public func renderWithoutRecording(_ data: Data) {
+        guard !data.isEmpty else { return }
+        outputQueue.async { [weak self] in
+            self?.onOutput?(data)
+        }
     }
 
     private static func stripANSI(_ text: String) -> String {
