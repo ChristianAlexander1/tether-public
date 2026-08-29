@@ -244,6 +244,20 @@ public final class TerminalSession: ObservableObject, Identifiable {
     }
     public func send(_ text: String) { send(Data(text.utf8)) }
 
+    /// Whether the PTY line discipline currently turns configured control
+    /// characters (such as Ctrl-C) into terminal signals. Full-screen programs
+    /// that disable `ISIG` must receive those bytes unchanged instead.
+    public var terminalSignalsEnabled: Bool {
+        #if canImport(Darwin)
+        guard let master = pty?.master else { return false }
+        var attributes = termios()
+        guard tcgetattr(master, &attributes) == 0 else { return false }
+        return (attributes.c_lflag & tcflag_t(ISIG)) != 0
+        #else
+        return false
+        #endif
+    }
+
     /// Notified after every geometry change so host-proxied jobs — which do
     /// not sit under the guest's controlling terminal and therefore never see
     /// the kernel's SIGWINCH — can be told the new size.

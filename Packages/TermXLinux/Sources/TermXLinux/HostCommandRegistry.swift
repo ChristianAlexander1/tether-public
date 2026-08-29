@@ -150,6 +150,7 @@ public final class HostCommandRegistry {
 public enum HostCommandHandler {
     public static let opener = "opener"
     public static let nodeMobile = "node-mobile"
+    public static let pythonEmbedded = "python-embedded"
     public static let wasm3 = "wasm3"
     /// The packaged CLI that owns its own installer and auth state. It is a
     /// distinct lane rather than a name the dispatcher compares against, so

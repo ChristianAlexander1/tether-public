@@ -32,6 +32,15 @@ int termx_blink_run_nested(const char *prog, char *const argv[], char *const env
 /// Request cooperative interruption of the running guest (maps to SIGINT delivery).
 void termx_blink_interrupt(void);
 
+/// Deliver a terminal-generated host signal to the guest foreground process
+/// group without marking the entire embedded run as cancelled.
+void termx_blink_terminal_signal(int signal_number);
+
+/// Terminate and reap every guest process still alive from this session.
+/// A sandboxed iOS app cannot enumerate its descendants, so guest jobs are
+/// tracked as they fork; without this they outlive the workspace as orphans.
+void termx_blink_reap_guest_children(void);
+
 /// Request cooperative termination of the running guest (maps to SIGTERM delivery).
 void termx_blink_terminate(void);
 

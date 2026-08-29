@@ -45,6 +45,14 @@ install_headers() {
   cp "$SRC/config.h" "$HEADERS_OUT/../config.h"
   install -d "$ROOT/include"
   cp "$SRC/config.h" "$ROOT/include/config.h"
+  # include/config.h is force-included when Swift Package Manager compiles the
+  # bridge for iOS, where ios-shims/config.h is not on the search path. macOS
+  # ./configure probes the host, so drop the two features the public iOS SDK
+  # marks unavailable; leaving them defined breaks the iOS bridge compile.
+  /usr/bin/sed -i '' \
+    -e 's|^#define HAVE_SYSCTL$|// #define HAVE_SYSCTL  /* unavailable on iOS */|' \
+    -e 's|^#define HAVE_GETDOMAINNAME$|// #define HAVE_GETDOMAINNAME  /* unavailable on iOS */|' \
+    "$ROOT/include/config.h"
   install -d "$ROOT/NOTICES"
   cat > "$ROOT/NOTICES/Blink-ISC.txt" <<'EOF'
 ISC License
@@ -69,6 +77,22 @@ EOF
 # iOS SDK marks clock_settime unavailable; Blink still references it in SysClockSettime.
 apply_ios_patches() {
   local f="$SRC/blink/syscall.c"
+
+  # Start from the pinned commit every time. The edits below are a mix of
+  # in-place rewrites and a tracked patch file; re-deriving them from a clean
+  # tree is what keeps the result identical no matter what a previous run (or
+  # an older revision of the patch) left behind.
+  git -C "$SRC" checkout -- .
+
+  # Upstream correctly delegates /dev, terminal process groups, and process
+  # bookkeeping to the host for its CLI. An embedded iOS app cannot make an
+  # app-owned PTY its Darwin controlling terminal, nor can a sandboxed app
+  # enumerate its own descendants, so apply the small boundary that exposes
+  # fd 0 as guest /dev/tty, stores the guest foreground group in our bridge,
+  # and registers each forked guest process for teardown.
+  local tty_patch="$ROOT/patches/blink-ios-embedded-tty.patch"
+  echo "==> Patching Blink devfs/hostfs/syscall for embedded iOS TTY ownership"
+  git -C "$SRC" apply "$tty_patch"
   if grep -q 'return clock_settime(sysclock, &ht);' "$f"; then
     echo "==> Patching blink/syscall.c for iOS (clock_settime)"
     /usr/bin/sed -i '' 's/return clock_settime(sysclock, \&ht);/errno = EPERM; return -1; \/* TermX iOS: clock_settime unavailable *\//' "$f"
@@ -104,7 +128,7 @@ build_ios_slice() {
   if [[ "$sdk" == "iphonesimulator" ]]; then
     cflags="-target ${arch}-apple-ios${MIN_IOS}-simulator"
   fi
-  cflags+=" -isysroot $sysroot -O2 -DNDEBUG -D_DARWIN_C_SOURCE"
+  cflags+=" -isysroot $sysroot -O2 -DNDEBUG -D_DARWIN_C_SOURCE -DTERMX_EMBEDDED_IOS=1"
   # iOS lacks fdatasync; map to fsync. clock_settime patched in apply_ios_patches.
   cflags+=" -Dfdatasync=fsync"
   # Upstream's Makefile supplies these; build_ios_slice drives clang directly, so

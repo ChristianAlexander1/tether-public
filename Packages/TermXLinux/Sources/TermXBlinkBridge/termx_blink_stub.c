@@ -18,6 +18,8 @@ int termx_blink_run_nested(const char *prog, char *const argv[], char *const env
   return -1;
 }
 void termx_blink_interrupt(void) {}
+void termx_blink_terminal_signal(int signal_number) { (void)signal_number; }
+void termx_blink_reap_guest_children(void) {}
 void termx_blink_terminate(void) {}
 int termx_blink_is_busy(void) { return 0; }
 void termx_blink_set_host_exec(termx_host_exec_fn fn, void *ctx) {

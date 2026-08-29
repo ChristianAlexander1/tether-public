@@ -239,7 +239,17 @@ public final class EmbeddedPythonService: PythonRuntime, @unchecked Sendable {
         if isPip && !isBootstrappingPip {
             isBootstrappingPip = true
             defer { isBootstrappingPip = false }
-            try? await bootstrapPipIfNeeded(home: merged["HOME"] ?? PythonEnvironment.defaultHome())
+            do {
+                try await bootstrapPipIfNeeded(environment: merged, cwd: cwd)
+            } catch {
+                if stderrFD >= 0 {
+                    let message = "\(argv[0]): unable to bootstrap bundled pip: \(error)\n"
+                    message.utf8CString.withUnsafeBufferPointer {
+                        _ = write(stderrFD, $0.baseAddress!, $0.count - 1)
+                    }
+                }
+                return 1
+            }
         }
 
         return await withCheckedContinuation { continuation in
@@ -285,8 +295,25 @@ public final class EmbeddedPythonService: PythonRuntime, @unchecked Sendable {
     /// Installs pip into `$PYTHONUSERBASE` without subprocess/fork (required on iOS).
     public func bootstrapPipIfNeeded(home: String) async throws {
         let env = PythonEnvironment.merge(base: [:], cwd: home, home: home)
-        let check = await run(argv: ["python3", "-m", "pip", "--version"], cwd: home, environment: env,
-                              stdinFD: -1, stdoutFD: -1, stderrFD: -1, interactive: false)
+        try await bootstrapPipIfNeeded(environment: env, cwd: home)
+    }
+
+    /// Bootstrap the user base selected by the command's actual environment.
+    /// Tools and virtual-environment wrappers legitimately override
+    /// `PYTHONUSERBASE`/`PYTHONPATH`; falling back to HOME here prepared one
+    /// directory and then launched pip against another.
+    private func bootstrapPipIfNeeded(environment: [String: String], cwd: String) async throws {
+        let env = PythonEnvironment.merge(base: environment, cwd: cwd)
+        // A negative descriptor means "leave the process descriptor alone" to
+        // the C bridge. During an interactive guest session those process
+        // descriptors are the terminal, so the expected first-run import miss
+        // leaked a scary `No module named pip` line before bootstrap succeeded.
+        // Probe and extract quietly through a real null descriptor instead.
+        let nullFD = open("/dev/null", O_RDWR)
+        guard nullFD >= 0 else { throw PythonRuntimeError.initializationFailed }
+        defer { close(nullFD) }
+        let check = await run(argv: ["python3", "-m", "pip", "--version"], cwd: cwd, environment: env,
+                              stdinFD: nullFD, stdoutFD: nullFD, stderrFD: nullFD, interactive: false)
         if check == 0 { return }
 
         guard let stdlibRoot = stdlibPath
@@ -304,8 +331,8 @@ public final class EmbeddedPythonService: PythonRuntime, @unchecked Sendable {
             raise SystemExit('pip wheel missing')
         zipfile.ZipFile(wheels[0]).extractall(site)
         """
-        let code = await run(argv: ["python3", "-c", script], cwd: home, environment: env,
-                             stdinFD: -1, stdoutFD: -1, stderrFD: -1, interactive: false)
+        let code = await run(argv: ["python3", "-c", script], cwd: cwd, environment: env,
+                             stdinFD: nullFD, stdoutFD: nullFD, stderrFD: nullFD, interactive: false)
         if code != 0 { throw PythonRuntimeError.initializationFailed }
     }
 
@@ -362,7 +389,7 @@ public final class EmbeddedPythonService: PythonRuntime, @unchecked Sendable {
 
     private func normalizeArgv(_ argv: [String]) -> [String] {
         guard let first = argv.first else { return argv }
-        if first == "pip" {
+        if first == "pip" || first == "pip3" {
             return ["python3", "-m", "pip"] + Array(argv.dropFirst())
         }
         if first == "python" {

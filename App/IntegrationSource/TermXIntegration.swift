@@ -30,6 +30,12 @@ public final class TermXIntegration {
     private var _claude: ClaudeCodeService?
     private var _wasm: TetherWasmService?
 
+    /// `hostExec` runs on Blink's parent-only worker while UI keystrokes arrive
+    /// on another queue. This small state boundary identifies the runtime that
+    /// currently owns the shared PTY.
+    private let activeHostHandlerLock = NSLock()
+    private var activeHostHandler: String?
+
     private let dispatchManifest = GuestDispatchManifest.loadDefault()
     /// Owned by the Linux engine; held here so `runHostBacked` can resolve how
     /// to run a command instead of comparing its name to a literal.
@@ -266,6 +272,13 @@ public final class TermXIntegration {
         // shell; termx_blink_interrupt() during an idle prompt tears down the session.
     }
 
+    /// Final teardown step: guest background and stopped jobs outlive the login
+    /// shell, and iOS reparents them to launchd rather than ending them with
+    /// the app, so they must be killed and reaped explicitly.
+    public func reapGuestProcesses() {
+        _linux?.reapGuestProcesses()
+    }
+
     /// Nested guest ELF for a host-job spawn (`git`, `/bin/sh -c`, …) while
     /// the login shell is waiting on that job. Never calls `termx_blink_run`
     /// against the live login machine.
@@ -279,16 +292,39 @@ public final class TermXIntegration {
         })
     }
 
-    /// Cooked-mode Ctrl-C for a host-proxied job: the kernel cannot deliver
-    /// SIGINT to Node (it is not in the PTY's process group), so we push
-    /// SIGINT over TJIP/2. Raw-mode programs receive the 0x03 byte on the
-    /// live stdin channel and count their own presses — including Claude's
-    /// native double-Ctrl-C.
-    public func handleHostJobKeystroke(_ data: Data) {
-        let raw = _node?.foregroundIsRaw == true
-        let name = HostJobKeystrokePolicy.signalName(for: data, foregroundIsRaw: raw)
-        guard let name else { return }
-        _node?.signalActiveJob(name)
+    /// Route line-discipline control characters to whichever runtime owns the
+    /// PTY. Raw-mode programs receive the original bytes only (including
+    /// Claude's native double-Ctrl-C); cooked-mode host jobs need an explicit
+    /// runtime interrupt, while guest jobs need Blink's virtual terminal signal.
+    public func handleHostJobKeystroke(_ data: Data, terminalSignalsEnabled: Bool = true) {
+        let handler = activeHostHandlerLock.withLock { activeHostHandler }
+
+        if handler == HostCommandHandler.nodeMobile || handler == HostCommandHandler.claudeCode {
+            let raw = _node?.foregroundIsRaw == true
+            let name = HostJobKeystrokePolicy.signalName(for: data, foregroundIsRaw: raw)
+            guard let name else { return }
+            _node?.signalActiveJob(name)
+            return
+        }
+
+        guard terminalSignalsEnabled else { return }
+        if handler == HostCommandHandler.pythonEmbedded {
+            if data.contains(0x03) { _python?.interrupt() }
+            return
+        }
+        if handler == HostCommandHandler.wasm3 {
+            if data.contains(0x03) { _wasm?.interrupt() }
+            return
+        }
+        guard handler == nil else { return }
+
+        if data.contains(0x03) {
+            _linux?.terminalSignal(SIGINT)
+        } else if data.contains(0x1c) {
+            _linux?.terminalSignal(SIGQUIT)
+        } else if data.contains(0x1a) {
+            _linux?.terminalSignal(SIGTSTP)
+        }
     }
 
     /// SwiftTerm query replies (DA, XTVERSION) have no newline, so they never
@@ -405,6 +441,8 @@ public final class TermXIntegration {
         // manifest's packaged runtimes with everything discovered on disk.
         // Nothing below compares `name` against a program literal.
         let command = self.hostCommandRegistry?.command(named: name)
+        activeHostHandlerLock.withLock { activeHostHandler = command?.handler }
+        defer { activeHostHandlerLock.withLock { activeHostHandler = nil } }
         Task.detached {
             if command?.handler == HostCommandHandler.opener {
                 let args = Array(argv.dropFirst())
@@ -450,6 +488,14 @@ public final class TermXIntegration {
                     || (fds.2 >= 0 && isatty(fds.2) != 0)
                 box.value = await self.node.run(
                     argv: argv, cwd: hostCwd, env: env,
+                    stdinFD: fds.0, stdoutFD: fds.1, stderrFD: fds.2,
+                    interactive: interactive
+                )
+            } else if command?.handler == HostCommandHandler.pythonEmbedded {
+                let interactive = (fds.1 >= 0 && isatty(fds.1) != 0)
+                    || (fds.2 >= 0 && isatty(fds.2) != 0)
+                box.value = await self.python.run(
+                    argv: argv, cwd: hostCwd, environment: env,
                     stdinFD: fds.0, stdoutFD: fds.1, stderrFD: fds.2,
                     interactive: interactive
                 )
@@ -653,4 +699,3 @@ private final class LinuxAdapter: ClaudeLinuxRunner {
 
     func interrupt() { service.interrupt() }
 }
-

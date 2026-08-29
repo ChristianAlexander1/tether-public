@@ -446,6 +446,12 @@ public final class BlinkLinuxService: LinuxGuestRuntime {
         runtime.interrupt()
     }
 
+    /// Deliver a line-discipline signal to the foreground guest job without
+    /// cancelling the long-lived login-shell run.
+    public func terminalSignal(_ signal: Int32) {
+        termx_blink_terminal_signal(signal)
+    }
+
     /// Whether guest `/work` and `/workspaces` are real VfsMounts into Blink.
     /// False on the host CLI lane, which has no bind-mount support.
     public var bindMountsAvailable: Bool { runtime.supportsBindMounts }
@@ -484,6 +490,14 @@ public final class BlinkLinuxService: LinuxGuestRuntime {
         interrupted = true
         lock.unlock()
         runtime.terminate()
+    }
+
+    /// Kill and reap guest processes that are still alive after the login
+    /// shell has gone. Background and stopped jobs survive their shell, and a
+    /// sandboxed iOS app cannot enumerate its own descendants to find them —
+    /// the engine tracks them as they fork so teardown can clean up here.
+    public func reapGuestProcesses() {
+        runtime.reapGuestProcesses()
     }
 
     /// True while the login shell (or any guest program) owns Blink's global machine.

@@ -159,6 +159,10 @@ wasm module.wasm arg1 arg2
 - `TETHER_AUTOCOMMAND_FILE=/absolute/path/to/commands.sh`
 - `TETHER_PTY_LOG=1` mirrors debug PTY bytes to the app-owned
   `Documents/.tether-pty.log`
+- `TETHER_TTY_TRACE=1` traces the guest foreground process group and every
+  terminal signal decision to stderr. Use it to tell "the signal was never
+  sent" apart from "the signal was sent and ignored" when a job-control result
+  looks wrong; it prints nothing unless set.
 - `TETHER_HOST_SHELL=1` selects the host shell; Alpine is the product default
 
 TJIP/2 is the only Node IPC lane: per-fd `isTTY` from the protocol handshake,
@@ -167,6 +171,11 @@ real PTY geometry pushed on resize, true colour depth, live stdin over
 
 Legacy `TERMX_` aliases remain readable for existing automation, but new usage
 should use `TETHER_`.
+
+Automation command files are line-oriented. Normal lines are sent followed by
+LF. The DEBUG harness also recognizes `#delay N`, `#enter` (terminal Return/CR),
+`#ctrlc`, `#ctrlz`, and `#raw:TEXT`; these make interactive menu and signal acceptance
+repeatable without changing release behavior.
 
 ### Checking the TJIP/2 lane by hand
 

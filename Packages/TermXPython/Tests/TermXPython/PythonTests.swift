@@ -176,6 +176,31 @@ final class PythonTests: XCTestCase {
         XCTAssertTrue(combined.contains("2"), combined)
     }
 
+    func testFirstPipRunBootstrapsWithoutLeakingImportFailure() async throws {
+        let result = try await runCapture(["pip", "--version"])
+        XCTAssertEqual(result.code, 0, result.stdout + result.stderr)
+        XCTAssertTrue(result.stdout.contains("pip "), result.stdout)
+        XCTAssertFalse(result.stderr.contains("No module named pip"), result.stderr)
+    }
+
+    func testPipBootstrapsTheEnvironmentSelectedUserBase() async throws {
+        // Seed HOME's default user base first. The old implementation would see
+        // this pip, skip bootstrap, then fail when the real command selected a
+        // different PYTHONUSERBASE/PYTHONPATH.
+        let defaultResult = try await runCapture(["pip", "--version"])
+        XCTAssertEqual(defaultResult.code, 0, defaultResult.stdout + defaultResult.stderr)
+
+        let customBase = home.appendingPathComponent("custom-python", isDirectory: true)
+        var customEnv = PythonTestSupport.baseEnv(home: home)
+        customEnv["PYTHONUSERBASE"] = customBase.path
+        customEnv["PYTHONPATH"] = customBase
+            .appendingPathComponent("lib/python\(PythonEnvironment.pythonVersion)/site-packages", isDirectory: true).path
+        let customResult = try await runCapture(["pip", "--version"], env: customEnv)
+        XCTAssertEqual(customResult.code, 0, customResult.stdout + customResult.stderr)
+        XCTAssertTrue(customResult.stdout.contains(customBase.path), customResult.stdout)
+        XCTAssertFalse(customResult.stderr.contains("No module named pip"), customResult.stderr)
+    }
+
     func testStdlibImportSweep() async throws {
         let result = try await runCapture(["python3", "-c", "import ssl, sqlite3, ctypes; print('ok')"])
         let combined = result.stdout + result.stderr

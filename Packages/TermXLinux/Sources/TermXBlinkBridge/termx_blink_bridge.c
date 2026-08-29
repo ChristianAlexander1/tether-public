@@ -16,8 +16,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/uio.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "blink/bus.h"
@@ -52,9 +55,31 @@ static pid_t g_embedded_run_pid;
 static pthread_mutex_t g_nested_mu = PTHREAD_MUTEX_INITIALIZER;
 static termx_host_exec_fn g_host_exec;
 static void *g_host_exec_ctx;
-/* Protects bridge-side publication and retirement of Blink's global machine.
- * UI teardown may request a guest signal from a different thread. */
+/* Blink's g_machine is thread-local. Publish the machine that owns the active
+ * embedded run separately so UIKit/terminal callbacks on another thread can
+ * safely enqueue a guest signal. Both publication and retirement use this
+ * lock; a callback must never retain the pointer after unlocking. */
 static pthread_mutex_t g_machine_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct Machine *g_active_machine;
+/* Darwin cannot assign an app-owned PTY as the process controlling terminal.
+ * The iOS-only Blink VFS patch calls the hooks below to keep the Linux session
+ * and foreground-process-group contract inside the emulator instead.
+ *
+ * This state lives in a MAP_SHARED page, which is not an optimization: ash sets
+ * the foreground group from inside a forked child, and the app parent — where
+ * terminal keystrokes arrive — has to see that write. `children` is the live
+ * set of guest processes; every fork descendant inherits this same page and
+ * records itself, which is what lets teardown reap a whole guest tree the
+ * sandbox gives us no other way to enumerate. */
+#define TERMX_TTY_MAX_CHILDREN 256
+struct TermxTtyState {
+  _Atomic int session;
+  _Atomic int foreground_pgrp;
+  _Atomic int children[TERMX_TTY_MAX_CHILDREN];
+};
+static struct TermxTtyState g_tty_fallback;
+static struct TermxTtyState *g_tty = &g_tty_fallback;
+static _Atomic bool g_tty_trace;
 
 /* Parent-only worker: Blink ash fork()+exec would otherwise call Swift/Node
  * inside the child process (unsafe after fork). Requests go over a socketpair. */
@@ -77,6 +102,127 @@ static char (*g_dispatch_names)[TERMX_DISPATCH_NAME_MAX];
 static int g_dispatch_count;
 static int g_dispatch_capacity;
 static pthread_mutex_t g_dispatch_mu = PTHREAD_MUTEX_INITIALIZER;
+
+pid_t termx_blink_tty_getsid(void) {
+  int sid = atomic_load_explicit(&g_tty->session, memory_order_acquire);
+  return sid > 0 ? (pid_t)sid : getsid(0);
+}
+
+pid_t termx_blink_tty_getpgrp(void) {
+  int pgrp = atomic_load_explicit(&g_tty->foreground_pgrp, memory_order_acquire);
+  return pgrp > 0 ? (pid_t)pgrp : getpgrp();
+}
+
+int termx_blink_tty_setpgrp(pid_t pgrp) {
+  if (pgrp <= 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  atomic_store_explicit(&g_tty->foreground_pgrp, (int)pgrp, memory_order_release);
+  if (atomic_load_explicit(&g_tty_trace, memory_order_relaxed)) {
+    dprintf(STDERR_FILENO, "[tether-tty] foreground pgrp=%d self-pgrp=%d\n",
+            (int)pgrp, (int)getpgrp());
+  }
+  return 0;
+}
+
+/* Called by the patched Blink fork() from inside every new guest process,
+ * before it runs any guest code.
+ *
+ * A guest job is a real Darwin process, but it is forked from whatever app
+ * thread is running the emulator — a libdispatch worker, which by design has
+ * every asynchronous signal blocked so that signals reach the main thread
+ * instead. A child inheriting that mask silently defers SIGINT, SIGTERM and
+ * SIGTSTP forever, so Ctrl-C could not stop a foreground job no matter which
+ * signal the terminal sent; only SIGKILL and SIGSTOP, which cannot be
+ * blocked, had any effect. A forked guest process is not part of the app's
+ * dispatch machinery and must start from a plain, empty mask, exactly as a
+ * child of a real shell would.
+ *
+ * The pid table lives in the shared page, so a grandchild registers itself
+ * where the app parent can see it; iOS gives a sandboxed app no way to
+ * enumerate its own descendants, and leaked guest jobs otherwise outlive the
+ * workspace. */
+void termx_blink_guest_child_started(void) {
+  int i;
+  int self = (int)getpid();
+  sigset_t empty;
+
+  sigemptyset(&empty);
+  pthread_sigmask(SIG_SETMASK, &empty, NULL);
+
+  for (i = 0; i < TERMX_TTY_MAX_CHILDREN; ++i) {
+    int slot = atomic_load_explicit(&g_tty->children[i], memory_order_acquire);
+    if (slot == self) return;
+    /* Reclaim a slot whose process is fully gone. A zombie still answers
+     * kill(pid, 0), so a job awaiting its parent's wait() keeps its slot. */
+    if (slot > 0 && kill((pid_t)slot, 0) == -1 && errno == ESRCH) {
+      if (!atomic_compare_exchange_strong_explicit(
+              &g_tty->children[i], &slot, 0, memory_order_acq_rel,
+              memory_order_relaxed)) {
+        continue;
+      }
+      slot = 0;
+    }
+    if (slot == 0 &&
+        atomic_compare_exchange_strong_explicit(&g_tty->children[i], &slot,
+                                                self, memory_order_acq_rel,
+                                                memory_order_relaxed)) {
+      return;
+    }
+  }
+}
+
+void termx_blink_reap_guest_children(void) {
+  int i;
+  int round;
+  pid_t self = getpid();
+  bool traced = atomic_load_explicit(&g_tty_trace, memory_order_relaxed);
+  /* SIGCONT first: a stopped job would never act on SIGTERM. Two rounds give
+   * a job its own chance to exit before the uncatchable one. */
+  for (round = 0; round < 2; ++round) {
+    int signalled = 0;
+    for (i = 0; i < TERMX_TTY_MAX_CHILDREN; ++i) {
+      int pid = atomic_load_explicit(&g_tty->children[i], memory_order_acquire);
+      if (pid <= 0 || (pid_t)pid == self) continue;
+      if (kill((pid_t)pid, 0) == -1 && errno == ESRCH) {
+        atomic_store_explicit(&g_tty->children[i], 0, memory_order_release);
+        continue;
+      }
+      if (round == 0) {
+        kill((pid_t)pid, SIGCONT);
+        kill((pid_t)pid, SIGTERM);
+      } else {
+        kill((pid_t)pid, SIGKILL);
+      }
+      ++signalled;
+      if (traced) {
+        dprintf(STDERR_FILENO, "[tether-tty] reap pid=%d round=%d\n", pid,
+                round);
+      }
+    }
+    if (!signalled) break;
+    if (round == 0) {
+      /* The jobs exiting raise SIGCHLD, which cuts the wait short; resume it
+       * so round 1 really does give them the grace period it promises. */
+      struct timespec grace = {0, 150 * 1000 * 1000};
+      struct timespec left = grace;
+      while (nanosleep(&left, &left) == -1 && errno == EINTR) continue;
+    }
+  }
+  /* Reap by pid, never waitpid(-1): Node and Foundation also spawn children
+   * from this process and a wildcard wait would consume their exit statuses.
+   * Only direct children are collectable here — deeper descendants were
+   * reparented when their own parent exited and belong to init now. */
+  for (i = 0; i < TERMX_TTY_MAX_CHILDREN; ++i) {
+    int pid = atomic_load_explicit(&g_tty->children[i], memory_order_acquire);
+    if (pid <= 0 || (pid_t)pid == self) continue;
+    while (waitpid((pid_t)pid, NULL, WNOHANG) == -1 && errno == EINTR) continue;
+    if (kill((pid_t)pid, 0) == -1 && errno == ESRCH) {
+      atomic_store_explicit(&g_tty->children[i], 0, memory_order_release);
+    }
+  }
+}
 
 static const char *prog_basename(const char *prog) {
   const char *base;
@@ -463,6 +609,7 @@ static _Noreturn void termx_blink_finish_guest(int status) {
   if (active && runner) {
     pthread_mutex_lock(&g_machine_mu);
     /* SysExitGroup has already freed the machine before calling exit. */
+    g_active_machine = NULL;
     g_machine = NULL;
     pthread_mutex_unlock(&g_machine_mu);
     g_guest_exit = status & 255;
@@ -499,8 +646,15 @@ void TerminateSignal(struct Machine *m, int sig, int code) {
   DisableJit(&m->system->jit);
 #endif
   syssig = XlatSignal(sig);
+  /* A foreground command is a real fork child. Returning through the copied
+   * parent checkpoint would re-enter app-side Swift in that child; report the
+   * conventional 128+signal status and terminate the child process instead. */
+  if (g_embedded_run_pid != 0 && getpid() != g_embedded_run_pid) {
+    _exit(128 + (syssig > 0 ? syssig : sig));
+  }
   pthread_mutex_lock(&g_machine_mu);
-  if (g_machine == m) g_machine = NULL;  /* don't leave a dangling machine */
+  if (g_active_machine == m) g_active_machine = NULL;
+  if (g_machine == m) g_machine = NULL;  /* runner-thread TLS */
   pthread_mutex_unlock(&g_machine_mu);
   FreeMachine(m);
 #ifdef HAVE_JIT
@@ -583,6 +737,7 @@ static int TermxExec(char *execfn, char *prog, char **argv, char **envp) {
    * still the wrong tool — RemoveOtherThreads already ran. */
   if (old && !fork_child) KillOtherThreads(old->system);
   g_machine = m = NewMachine(NewSystem(XED_MACHINE_MODE_LONG), 0);
+  g_active_machine = m;
   if (fork_child) m->system->isfork = true;
   pthread_mutex_unlock(&g_machine_mu);
   unassert(m);
@@ -631,6 +786,7 @@ int termx_blink_is_available(void) {
 }
 
 int termx_blink_init(const char *rootfs_prefix) {
+  struct TermxTtyState *shared_tty;
   if (g_initialized) return 0;
   if (!rootfs_prefix || !*rootfs_prefix) return -EINVAL;
 
@@ -648,6 +804,18 @@ int termx_blink_init(const char *rootfs_prefix) {
   }
 
   signal(SIGPIPE, SIG_IGN);
+
+  /* BusyBox ash performs job-control setup from both sides of a real fork.
+   * Keep the virtual controlling-terminal state visible to the app parent so
+   * terminal keystrokes can target the child foreground group. */
+  shared_tty = mmap(NULL, sizeof(*shared_tty), PROT_READ | PROT_WRITE,
+                    MAP_SHARED | MAP_ANON, -1, 0);
+  if (shared_tty != MAP_FAILED) g_tty = shared_tty;
+  memset(g_tty, 0, sizeof(*g_tty));
+  atomic_init(&g_tty->session, (int)getsid(0));
+  atomic_init(&g_tty->foreground_pgrp, (int)getpgrp());
+  atomic_store_explicit(&g_tty_trace, getenv("TETHER_TTY_TRACE") != NULL,
+                        memory_order_relaxed);
 
   InitBus();
   g_initialized = true;
@@ -760,8 +928,18 @@ int termx_blink_run(const char *prog, char *const argv[], char *const envp[],
   } else {
     rc = g_guest_exit;
   }
+  pthread_mutex_lock(&g_machine_mu);
+  if (g_active_machine == g_machine) g_active_machine = NULL;
+  g_machine = NULL;
+  pthread_mutex_unlock(&g_machine_mu);
   atomic_store_explicit(&g_embedded_run_active, false, memory_order_release);
   g_embedded_run_pid = 0;
+  /* The login shell has returned, so nothing it started is still wanted. Its
+   * background jobs would otherwise be reparented to launchd and keep running
+   * with the workspace's file descriptors held open. */
+  termx_blink_reap_guest_children();
+  atomic_store_explicit(&g_tty->foreground_pgrp, (int)getpgrp(),
+                        memory_order_release);
 
   blink_free_argv(mutable_argv, argc, execfn);
   blink_restore_stdio(saved_stdio);
@@ -779,6 +957,7 @@ int termx_blink_run_nested(const char *prog, char *const argv[], char *const env
   pthread_t saved_thread;
   pid_t saved_pid;
   struct Machine *saved_machine;
+  struct Machine *saved_active_machine;
   int saved_stdio[3] = {-1, -1, -1};
   bool saved_active;
 
@@ -807,10 +986,12 @@ int termx_blink_run_nested(const char *prog, char *const argv[], char *const env
 
   pthread_mutex_lock(&g_machine_mu);
   saved_machine = g_machine;
+  saved_active_machine = g_active_machine;
   /* Hide the login machine so TermxExec does not KillOtherThreads / FreeMachine
    * it. Nested exec is a private machine; the login shell stays blocked in
    * host_exec until we return. */
   g_machine = NULL;
+  g_active_machine = NULL;
   pthread_mutex_unlock(&g_machine_mu);
 
   g_interrupted = 0;
@@ -827,6 +1008,7 @@ int termx_blink_run_nested(const char *prog, char *const argv[], char *const env
 
   pthread_mutex_lock(&g_machine_mu);
   g_machine = saved_machine;
+  g_active_machine = saved_active_machine;
   pthread_mutex_unlock(&g_machine_mu);
 
   memcpy(&g_exit_jmp, &saved_jmp, sizeof(jmp_buf));
@@ -847,13 +1029,70 @@ restore_stdio:
 static void termx_blink_enqueue_signal(int sig) {
   g_interrupted = 1;
   pthread_mutex_lock(&g_machine_mu);
-  if (g_machine) {
+  if (g_active_machine) {
     /* Queue a Linux guest signal directly. Using raise() here delivered a
      * process signal on the calling (usually UIKit) thread even though Blink's
      * setjmp and machine live on its worker thread, which could terminate the
      * whole app during Close Workspace. */
-    EnqueueSignal(g_machine, sig);
+    EnqueueSignal(g_active_machine, sig);
   }
+  pthread_mutex_unlock(&g_machine_mu);
+}
+
+void termx_blink_terminal_signal(int signal_number) {
+  int guest_signal;
+  int host_signal = signal_number;
+  pid_t foreground;
+  pid_t app_pgrp;
+  bool traced = atomic_load_explicit(&g_tty_trace, memory_order_relaxed);
+
+  switch (signal_number) {
+    case SIGINT:  guest_signal = SIGINT_LINUX; break;
+    case SIGQUIT: guest_signal = SIGQUIT_LINUX; break;
+    case SIGTSTP:
+      guest_signal = SIGTSTP_LINUX;
+      /* Ctrl-Z must use the uncatchable host stop. Blink mirrors each guest
+       * disposition onto its host process, and a job-control shell ignores
+       * SIGTSTP; its forked child inherits that host SIG_IGN before it gets
+       * to reset its own dispositions, so a real SIGTSTP is measurably
+       * swallowed and the job never stops. Nothing is lost by stopping it
+       * outright: a program that wants to handle Ctrl-Z itself clears ISIG,
+       * and the UI layer then passes the keystroke through as a byte instead
+       * of asking for a terminal signal at all. */
+      host_signal = SIGSTOP;
+      break;
+    default: return;
+  }
+
+  foreground = termx_blink_tty_getpgrp();
+  app_pgrp = getpgrp();
+  if (traced) {
+    dprintf(STDERR_FILENO,
+            "[tether-tty] signal=%d foreground=%d app-pgrp=%d host=%d\n",
+            signal_number, (int)foreground, (int)app_pgrp, host_signal);
+  }
+
+  /* Blink runs each guest job in a real Darwin process, and SysSigaction keeps
+   * that process's host disposition in sync with the guest's. Signalling the
+   * foreground group with the real host signal is therefore exactly what a tty
+   * line discipline does: a guest handler runs via Blink's OnSignal, and a
+   * guest default action becomes the host default action on the child.
+   *
+   * A private wake signal cannot replace this. Blink's ExecveBlink blocks
+   * every signal across the exec handoff, and any signal with no Linux
+   * counterpart stays blocked or ignored in the exec'd child, so it never
+   * reaches a handler. Only dispositions Blink itself maintains get through.
+   *
+   * Never signal the app's own group: the login shell shares this process. */
+  if (foreground > 0 && foreground != app_pgrp) {
+    if (kill(-foreground, host_signal) == 0) return;
+    if (errno != ESRCH) return;
+  }
+
+  /* The login shell lives in the app process. Queue its Linux signal directly
+   * without setting g_interrupted, which is the whole-run cancellation flag. */
+  pthread_mutex_lock(&g_machine_mu);
+  if (g_active_machine) EnqueueSignal(g_active_machine, guest_signal);
   pthread_mutex_unlock(&g_machine_mu);
 }
 
@@ -868,7 +1107,7 @@ void termx_blink_terminate(void) {
 int termx_blink_is_busy(void) {
   int busy;
   pthread_mutex_lock(&g_machine_mu);
-  busy = g_machine != NULL ? 1 : 0;
+  busy = g_active_machine != NULL ? 1 : 0;
   pthread_mutex_unlock(&g_machine_mu);
   return busy;
 }

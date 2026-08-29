@@ -11,6 +11,13 @@ protocol LinuxRuntime: AnyObject {
     func runNested(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool) -> Int32
     func interrupt()
     func terminate()
+    /// Terminate and reap guest processes that outlived the login shell.
+    func reapGuestProcesses()
+}
+
+extension LinuxRuntime {
+    /// Only the embedded engine forks guest processes into this app.
+    func reapGuestProcesses() {}
 }
 
 enum LinuxRuntimeFactory {
@@ -162,6 +169,10 @@ final class EmbeddedBlinkRuntime: LinuxRuntime {
 
     func terminate() {
         termx_blink_terminate()
+    }
+
+    func reapGuestProcesses() {
+        termx_blink_reap_guest_children()
     }
 }
 

@@ -1,0 +1,164 @@
+diff --git a/blink/devfs.c b/blink/devfs.c
+index b869e9f..b777114 100644
+--- a/blink/devfs.c
++++ b/blink/devfs.c
+@@ -20,6 +20,7 @@
+ 
+ #include <stdlib.h>
+ #include <string.h>
++#include <unistd.h>
+ 
+ #include "blink/errno.h"
+ #include "blink/hostfs.h"
+@@ -58,6 +59,20 @@ static int DevfsReadmountentry(struct VfsDevice *device, char **spec,
+   return 0;
+ }
+ 
++static int DevfsOpen(struct VfsInfo *parent, const char *name, int flags,
++                     int mode, struct VfsInfo **output) {
++#ifdef TERMX_EMBEDDED_IOS
++  /* An iOS app cannot make the session PTY its native controlling terminal.
++   * `/dev/tty` therefore fails through Darwin even though fd 0 is the real PTY
++   * slave. Expose that same open file description to the Linux guest; this is
++   * what a controlling-terminal open means for the one embedded Blink session. */
++  if (name && !strcmp(name, "tty") && isatty(STDIN_FILENO)) {
++    return HostfsWrapFd(STDIN_FILENO, true, output);
++  }
++#endif
++  return HostfsOpen(parent, name, flags, mode, output);
++}
++
+ struct VfsSystem g_devfs = {.name = "devfs",
+                             .nodev = true,
+                             .ops = {
+@@ -69,7 +84,7 @@ struct VfsSystem g_devfs = {.name = "devfs",
+                                 .Readlink = HostfsReadlink,
+                                 .Mkdir = HostfsMkdir,
+                                 .Mkfifo = HostfsMkfifo,
+-                                .Open = HostfsOpen,
++                                .Open = DevfsOpen,
+                                 .Access = HostfsAccess,
+                                 .Stat = HostfsStat,
+                                 .Fstat = HostfsFstat,
+diff --git a/blink/hostfs.c b/blink/hostfs.c
+index 0382528..3d617d3 100644
+--- a/blink/hostfs.c
++++ b/blink/hostfs.c
+@@ -27,6 +27,7 @@
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
+ #include <sys/types.h>
++#include <unistd.h>
+ 
+ #include "blink/assert.h"
+ #include "blink/errno.h"
+@@ -35,6 +36,15 @@
+ #include "blink/syscall.h"
+ #include "blink/vfs.h"
+ 
++#ifdef TERMX_EMBEDDED_IOS
++/* Supplied by Tether's embedding bridge. Darwin has no controlling-terminal
++ * relationship for an app-owned PTY, so the guest foreground group is kept at
++ * the emulator boundary instead of mutating the iOS application's session. */
++extern pid_t termx_blink_tty_getsid(void);
++extern pid_t termx_blink_tty_getpgrp(void);
++extern int termx_blink_tty_setpgrp(pid_t);
++#endif
++
+ #ifndef DISABLE_VFS
+ 
+ struct HostfsDevice {
+@@ -1709,7 +1719,13 @@ pid_t HostfsTcgetsid(struct VfsInfo *info) {
+     return efault();
+   }
+   hostinfo = (struct HostfsInfo *)info->data;
+-  return tcgetsid(hostinfo->filefd);
++  pid_t result = tcgetsid(hostinfo->filefd);
++#ifdef TERMX_EMBEDDED_IOS
++  if (result == -1 && errno == ENOTTY && isatty(hostinfo->filefd)) {
++    return termx_blink_tty_getsid();
++  }
++#endif
++  return result;
+ }
+ 
+ pid_t HostfsTcgetpgrp(struct VfsInfo *info) {
+@@ -1719,7 +1735,13 @@ pid_t HostfsTcgetpgrp(struct VfsInfo *info) {
+     return efault();
+   }
+   hostinfo = (struct HostfsInfo *)info->data;
+-  return tcgetpgrp(hostinfo->filefd);
++  pid_t result = tcgetpgrp(hostinfo->filefd);
++#ifdef TERMX_EMBEDDED_IOS
++  if (result == -1 && errno == ENOTTY && isatty(hostinfo->filefd)) {
++    return termx_blink_tty_getpgrp();
++  }
++#endif
++  return result;
+ }
+ 
+ int HostfsTcsetpgrp(struct VfsInfo *info, pid_t pgrp) {
+@@ -1729,7 +1751,13 @@ int HostfsTcsetpgrp(struct VfsInfo *info, pid_t pgrp) {
+     return efault();
+   }
+   hostinfo = (struct HostfsInfo *)info->data;
+-  return tcsetpgrp(hostinfo->filefd, pgrp);
++  int result = tcsetpgrp(hostinfo->filefd, pgrp);
++#ifdef TERMX_EMBEDDED_IOS
++  if (result == -1 && errno == ENOTTY && isatty(hostinfo->filefd)) {
++    return termx_blink_tty_setpgrp(pgrp);
++  }
++#endif
++  return result;
+ }
+ 
+ #ifdef HAVE_SOCKATMARK
+diff --git a/blink/syscall.c b/blink/syscall.c
+index 34cc01c..75628b8 100644
+--- a/blink/syscall.c
++++ b/blink/syscall.c
+@@ -83,6 +83,14 @@
+ #include "blink/vfs.h"
+ #include "blink/xlat.h"
+ 
++#ifdef TERMX_EMBEDDED_IOS
++/* Supplied by Tether's embedding bridge. A guest process forked out of an
++ * embedded Blink is not a plain child of a CLI: it inherits the host thread
++ * state of whichever app thread happened to run the emulator, and the app
++ * cannot enumerate its own descendants to clean them up. */
++extern void termx_blink_guest_child_started(void);
++#endif
++
+ #ifdef __linux
+ #include <sys/prctl.h>
+ #endif
+@@ -445,6 +453,9 @@ static int Fork(struct Machine *m, u64 flags, u64 stack, u64 ctid) {
+   }
+   if (!pid) {
+     newpid = getpid();
++#ifdef TERMX_EMBEDDED_IOS
++    termx_blink_guest_child_started();
++#endif
+     if (stack) {
+       Put64(m->sp, stack);
+     }
+@@ -1467,8 +1478,8 @@ static int SysUname(struct Machine *m, i64 utsaddr) {
+   memset(&uts, 0, sizeof(uts));
+   strcpy(uts.machine, "x86_64");
+   strcpy(uts.sysname, "Linux");
+-  strcpy(uts.release, LINUX_VERSION "-blink-" BLINK_VERSION);
+-  strcpy(uts.version, "#" BLINK_COMMITS " " BLINK_UNAME_V " " BUILD_TIMESTAMP);
++  strncpy(uts.release, LINUX_VERSION "-blink-" BLINK_VERSION, sizeof(uts.release) - 1);
++  strncpy(uts.version, "#" BLINK_COMMITS " " BLINK_UNAME_V " " BUILD_TIMESTAMP, sizeof(uts.version) - 1);
+   memset(u.host, 0, sizeof(u.host));
+   gethostname(u.host, sizeof(u.host) - 1);
+   strcpy(uts.nodename, u.host);
+@@ -4145,7 +4156,7 @@ static int SysClockSettime(struct Machine *m, int clock, i64 ts) {
+     ht.tv_sec = Read64(gt->sec);
+     ht.tv_nsec = Read64(gt->nsec);
+   }
+-  return clock_settime(sysclock, &ht);
++  errno = EPERM; return -1; /* TermX iOS: clock_settime unavailable */
+ }
+ #endif
+ 

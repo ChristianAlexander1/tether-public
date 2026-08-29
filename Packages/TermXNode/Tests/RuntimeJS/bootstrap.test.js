@@ -8,7 +8,7 @@ const test = require('node:test');
 const shimRoot = path.resolve(__dirname, '../../Sources/TermXNode/Resources/shim');
 const bootstrap = path.join(shimRoot, 'bootstrap.js');
 
-test('persistent bootstrap completes a job and stays ready for the next one', async (t) => {
+test('persistent bootstrap clears exitCode between jobs and stays ready', async (t) => {
   const env = { ...process.env, TETHER_JOB_FD: '3', TETHER_JOB_REPLY_FD: '4' };
   delete env.TETHER_IPC_SOCK;
   delete env.TERMX_IPC_SOCKET;
@@ -50,7 +50,19 @@ test('persistent bootstrap completes a job and stays ready for the next one', as
         replies.push(reply);
         if (reply.ready === true) {
           child.stdio[3].write(`${JSON.stringify({ kind: 'version' })}\n`);
-        } else if (reply.exitCode === 0) {
+        } else if (reply.exitCode === 0 && replies.length === 2) {
+          child.stdio[3].write(`${JSON.stringify({
+            kind: 'eval',
+            source: `if (process.exitCode !== undefined) throw new Error('stale exitCode: ' + process.exitCode); console.log('EXITCODE_UNSET')`,
+          })}\n`);
+        } else if (reply.exitCode === 0 && replies.length === 3) {
+          child.stdio[3].write(`${JSON.stringify({
+            kind: 'eval',
+            source: `try { process.exit(7); } catch { process.kill(process.pid, 'SIGKILL'); }`,
+          })}\n`);
+        } else if (reply.exitCode === 7 && replies.length === 4) {
+          child.stdio[3].write(`${JSON.stringify({ kind: 'version' })}\n`);
+        } else if (reply.exitCode === 0 && replies.length === 5) {
           clearTimeout(timer);
           resolve();
         }
@@ -60,6 +72,13 @@ test('persistent bootstrap completes a job and stays ready for the next one', as
 
   await completed;
   assert.match(stdout, /^v\d+/m);
+  assert.match(stdout, /^EXITCODE_UNSET$/m);
   assert.equal(stderr, '');
-  assert.deepEqual(replies, [{ ready: true }, { exitCode: 0 }]);
+  assert.deepEqual(replies, [
+    { ready: true },
+    { exitCode: 0 },
+    { exitCode: 0 },
+    { exitCode: 7 },
+    { exitCode: 0 },
+  ]);
 });

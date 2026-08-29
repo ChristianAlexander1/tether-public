@@ -96,6 +96,70 @@ function trappedExit(code) {
 process.reallyExit = trappedExit;
 process.exit = trappedExit;
 
+// The Node engine lives inside the iOS app process. A CLI that falls back to
+// killing itself after process.exit() throws must terminate only the current
+// hosted job, never the containing app. Claude Code deliberately uses this
+// pattern in its force-exit path:
+//
+//   try { process.exit(code) } catch { process.kill(process.pid, 'SIGKILL') }
+//
+// Keep real process.kill behavior for other pids, but virtualize every signal
+// aimed at this embedded engine (including its negative process-group form).
+const nativeProcessKill = process.kill.bind(process);
+const selfSignalExitCodes = {
+  SIGHUP: 129,
+  SIGINT: 130,
+  SIGQUIT: 131,
+  SIGABRT: 134,
+  SIGKILL: 137,
+  SIGUSR1: 138,
+  SIGUSR2: 140,
+  SIGPIPE: 141,
+  SIGTERM: 143,
+};
+
+function signalName(signal) {
+  if (signal === undefined || signal === null) return 'SIGTERM';
+  if (typeof signal === 'string') return signal.toUpperCase();
+  if (Number(signal) === 0) return '0';
+  try {
+    const constants = require('os').constants.signals;
+    for (const [name, number] of Object.entries(constants)) {
+      if (number === Number(signal)) return name;
+    }
+  } catch (_) { /* use the numeric fallback below */ }
+  return String(signal);
+}
+
+function trappedKill(pid, signal) {
+  const numericPID = Number(pid);
+  if (numericPID !== process.pid && numericPID !== -process.pid) {
+    return nativeProcessKill(pid, signal);
+  }
+
+  const name = signalName(signal);
+  if (name === '0') return true;
+  if (name !== 'SIGKILL' && process.listenerCount(name) > 0) {
+    process.emit(name);
+    return true;
+  }
+
+  // Preserve a status already supplied to process.exit(). That is what makes
+  // a caught process.exit(0) followed by self-SIGKILL still complete as 0.
+  const status = process.exitCode === undefined
+    ? (selfSignalExitCodes[name] ?? 1)
+    : (Number(process.exitCode) | 0);
+  process.exitCode = status;
+  throw new TermxExit(status);
+}
+
+process.kill = trappedKill;
+process.abort = function trappedAbort() {
+  const status = process.exitCode === undefined ? 134 : (Number(process.exitCode) | 0);
+  process.exitCode = status;
+  throw new TermxExit(status);
+};
+
 /** Set after intake socket is created — passed to lifecycle teardown. */
 let intakeSocket = null;
 /** Abort hook for the currently running job (cancel from Swift). */
@@ -146,6 +210,12 @@ function sanitizeHostPaths(text) {
 
 async function runJob(job, onDone) {
   const prevCwd = process.cwd();
+  // Match a fresh Node process: exitCode is undefined until user code sets it
+  // or calls process.exit(). A defined zero is not equivalent. Real CLIs
+  // (including Claude Code) use `process.exitCode !== undefined` to detect a
+  // shutdown already in progress; carrying the previous job's status into the
+  // next job made them skip initialization while appearing to hang.
+  process.exitCode = undefined;
   let replied = false;
   const reply = (obj) => {
     if (replied) return;
@@ -255,7 +325,6 @@ async function runJob(job, onDone) {
       evalModule.filename = evalFilename;
       evalModule.paths = Module._nodeModulePaths(process.cwd());
       const requireFromCwd = evalModule.require.bind(evalModule);
-      process.exitCode = 0;
       scriptFinish = code => {
         process.removeListener('beforeExit', onBeforeExit);
         reply({ exitCode: Number(code ?? 0) | 0 });
@@ -281,7 +350,6 @@ async function runJob(job, onDone) {
 
     const argv = Array.isArray(job.argv) ? job.argv.slice() : [];
     process.argv = argv;
-    process.exitCode = 0;
     scriptFinish = code => {
       process.removeListener('beforeExit', onBeforeExit);
       reply({ exitCode: Number(code ?? 0) | 0 });

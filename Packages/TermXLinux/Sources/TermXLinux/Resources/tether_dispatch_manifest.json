@@ -31,6 +31,26 @@
     },
     {
       "match": "basename",
+      "name": "python3",
+      "handler": "python-embedded"
+    },
+    {
+      "match": "basename",
+      "name": "python",
+      "handler": "python-embedded"
+    },
+    {
+      "match": "basename",
+      "name": "pip3",
+      "handler": "python-embedded"
+    },
+    {
+      "match": "basename",
+      "name": "pip",
+      "handler": "python-embedded"
+    },
+    {
+      "match": "basename",
       "name": "wasm",
       "handler": "wasm3"
     }

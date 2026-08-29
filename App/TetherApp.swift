@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import TermXCore
 import TermXFiles
 import TermXUI
@@ -281,6 +282,16 @@ struct WorkspaceView: View {
         .onReceive(NotificationCenter.default.publisher(for: .tetherLinuxRootfsRemoved)) { _ in
             lifecycle?.send(.rootfsRemovedExternally)
         }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willTerminateNotification
+        )) { _ in
+            // The one exit iOS announces. Guest jobs are separate processes
+            // that would otherwise be reparented and keep running; an outright
+            // kill of the app gives nothing a chance to run, but this path
+            // does. Backgrounding deliberately does not tear down: a long
+            // build should survive it.
+            teardownSession()
+        }
         .onDisappear {
             // Only tear down when leaving the workspace entirely — not when a
             // sheet (Storage / Files / Licenses) covers this view. Tearing down
@@ -341,8 +352,11 @@ struct WorkspaceView: View {
         newSession.onResize = { [weak model] cols, rows in
             model?.integration.resizeActiveRuntimes(cols: cols, rows: rows)
         }
-        newSession.onKeystroke = { [weak model] data in
-            model?.integration.handleHostJobKeystroke(data)
+        newSession.onKeystroke = { [weak model, weak newSession] data in
+            model?.integration.handleHostJobKeystroke(
+                data,
+                terminalSignalsEnabled: newSession?.terminalSignalsEnabled ?? false
+            )
         }
         newSession.onEmulatorReply = { [weak model] data in
             model?.integration.pushStdinToActiveHostJob(data) ?? false
@@ -385,9 +399,9 @@ struct WorkspaceView: View {
         #if DEBUG
         // Simulator harness: TETHER_AUTOCOMMANDS holds newline-separated
         // commands, or TETHER_AUTOCOMMAND_FILE points at a script in the
-        // workspace. Join with `;` and send once so the shell runs them
-        // in order to completion. A file avoids SIMCTL_CHILD env size /
-        // newline limits for longer acceptance batches.
+        // workspace. Lines are sent in order, with optional delays and control
+        // keys between them. A file avoids SIMCTL_CHILD env size / newline
+        // limits for longer acceptance batches.
         let script: String? = {
             let environment = ProcessInfo.processInfo.environment
             guard (environment["TETHER_UI_TEST_MODE"]
@@ -402,7 +416,9 @@ struct WorkspaceView: View {
         if let script, !script.isEmpty {
             // Line-oriented harness. Special lines (testing only):
             //   #delay N   — wait N seconds before the next send
-            //   #enter     — send a lone newline (confirm menus / theme pickers)
+            //   #enter     — send terminal Return/CR (confirm menus / theme pickers)
+            //   #ctrlc     — send the terminal Ctrl-C byte
+            //   #ctrlz     — send the terminal Ctrl-Z byte
             //   #raw:TEXT  — send TEXT without appending newline
             // Everything else is sent as `line\n` (a shell or TUI command).
             let lines = script
@@ -418,7 +434,18 @@ struct WorkspaceView: View {
                         continue
                     }
                     if line == "#enter" {
-                        newSession.send("\n")
+                        // A terminal Return key is CR (0x0D), not LF (0x0A).
+                        // Ink-style TUIs distinguish the two: LF is ordinary
+                        // input, while CR confirms the selected menu item.
+                        newSession.send("\r")
+                        continue
+                    }
+                    if line == "#ctrlc" {
+                        newSession.send(TerminalKey.ctrlC)
+                        continue
+                    }
+                    if line == "#ctrlz" {
+                        newSession.send(TerminalKey.control("z"))
                         continue
                     }
                     if line.hasPrefix("#raw:") {
@@ -456,6 +483,10 @@ struct WorkspaceView: View {
                 model.workspaces.endAccess(workspace)
             }
         }
+        // After the engine has been told to stop: anything the guest shell
+        // left behind (a background job, a job stopped with Ctrl-Z) would
+        // otherwise be reparented and keep running past the workspace.
+        model.integration.reapGuestProcesses()
         resolvedPath = nil
     }
 
