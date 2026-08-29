@@ -1,0 +1,54 @@
+#!/bin/sh
+# Block developer/agent debug residue and host-specific paths from being
+# committed. Instrumenting agents re-add this kind of thing regularly; the
+# repo is public, so it must not reach a commit.
+#
+# Install: git config core.hooksPath scripts/git-hooks
+# Bypass once (deliberately): git commit --no-verify
+
+set -eu
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -n "$staged" ] || exit 0
+
+fail=0
+report() {
+    if [ "$fail" -eq 0 ]; then
+        printf '\npre-commit: blocked — debug residue or host-specific data in staged changes\n\n' >&2
+        fail=1
+    fi
+    printf '  %s\n' "$1" >&2
+}
+
+# Patterns that must never appear in a commit. Kept as one alternation so a
+# single pass over the staged blobs covers all of them.
+pattern='/Users/[A-Za-z0-9._-]+/(Projects|Desktop|Documents|Downloads)|#region agent log|127\.0\.0\.1:7683|/ingest/[0-9a-f]{8}-|X-Debug-Session-Id|debug-[0-9a-f]{6}\.log'
+
+for f in $staged; do
+    # The detectors necessarily contain the patterns they look for.
+    case "$f" in
+        scripts/git-hooks/*|scripts/validate.sh) continue ;;
+    esac
+    # Read the staged content, not the worktree file: they can differ.
+    hits=$(git show ":$f" 2>/dev/null | grep -nEI "$pattern" || true)
+    [ -n "$hits" ] || continue
+    printf '%s\n' "$hits" | while IFS= read -r line; do
+        report "$f:$line"
+    done
+    fail=1
+done
+
+# Files that are local state, never repository content.
+for f in $staged; do
+    case "$f" in
+        *.DS_Store|.env|.env.*|*/xcuserdata/*|.cursor/*|*.mobileprovision|*.p12)
+            report "$f — local-only file, should not be tracked"
+            ;;
+    esac
+done
+
+if [ "$fail" -ne 0 ]; then
+    printf '\nStrip the lines above, or run: git commit --no-verify\n\n' >&2
+    exit 1
+fi
+exit 0

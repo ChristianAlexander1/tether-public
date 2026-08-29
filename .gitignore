@@ -69,3 +69,32 @@ default.profraw
 *.mobileprovision
 Secrets/
 credentials.json
+
+# AI/agent tooling local state (debug logs here have leaked host paths before)
+.claude/
+.codex/
+.aider*
+.continue/
+.windsurf/
+.cursorignore
+
+# Credentials and machine-local config that must never reach a public repo
+.netrc
+.npmrc
+.pypirc
+.ssh/
+*.pem
+*.key
+!**/include/**/*.key
+id_rsa*
+id_ed25519*
+*.keychain*
+*.certSigningRequest
+*.cer
+
+# Build/run artifacts and crash dumps
+*.ipa
+*.dSYM/
+*.hmap
+*.crash
+*.ips
