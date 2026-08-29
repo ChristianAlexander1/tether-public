@@ -4,7 +4,7 @@
 |---|---|---|
 | TetherCommands | `External/TetherCommands` | runtime dependency of TermXCore |
 | TetherShellLang | `External/TetherShellLang` | parser/evaluator conformance dependency |
-| tether-shim | `External/tether-shim` | source-of-truth protocol suite; product copy in TermXNode |
+| tether-shim-v2 | `External/tether-shim-v2` | source-of-truth TJIP/2 suite; product copy in TermXNode |
 | TetherFakefs | `Vendor/TetherFakefs` | validated storage library; awaits writable overlay |
 | TetherNativeOffload | `Vendor/TetherNativeOffload` | validated reference registry; production uses manifest bridge |
 | TetherWasm | `External/TetherWasm` | app runtime dependency |

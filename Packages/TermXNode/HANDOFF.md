@@ -6,8 +6,9 @@ Unix-socket child-process protocol.
 
 ## Platform behavior
 
-- `@tether/shim` is developed and tested in `External/tether-shim` and copied
-  into this package’s resources.
+- The TJIP/2 shim is developed and tested in `External/tether-shim-v2` and
+  copied into this package’s resources; `ShimV2InstallationTests` asserts the
+  two stay byte-for-byte identical.
 - `child_process` requests are delegated to `SpawnExecuting`; the bridge does
   not probe iOS host paths for guest commands.
 - standard opener commands use `SystemOpen` for any application and URL.
@@ -24,7 +25,7 @@ cannot corrupt nodejs-mobile’s process-wide host state.
 ## Verify
 
 ```sh
-cd External/tether-shim && npm test
+cd External/tether-shim-v2 && node --test test/*.test.js
 cd Packages/TermXNode && swift test
 ```
 

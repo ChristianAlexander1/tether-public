@@ -21,7 +21,7 @@ Last verified integration pass: **2026-08-27** (lifecycle and runtime stabilizat
 |---|---|
 | P1 commands | `External/TetherCommands`; registered by TermXCore |
 | P2 shell | `External/TetherShellLang`; standalone suite + TermXCore conformance gate |
-| P3 Node shim | `External/tether-shim`; synchronized product implementation in TermXNode |
+| P3 Node shim | `External/tether-shim-v2`; synchronized product implementation in TermXNode |
 | P4 fakefs | `Vendor/TetherFakefs`; real pack/read/CRC suite, retained for a writable-overlay design |
 | P5 offload | `Vendor/TetherNativeOffload`; C registry verified beside production manifest dispatch |
 | P6 WASM | `External/TetherWasm`; wired into app command dispatch |

@@ -131,8 +131,6 @@ quick_tests() {
   done
   swift_test "$ROOT"
 
-  echo "== npm test: External/tether-shim =="
-  (cd "$ROOT/External/tether-shim" && npm test)
   echo "== npm test: External/tether-spawn-fixtures =="
   (cd "$ROOT/External/tether-spawn-fixtures" && npm test)
   # `node --test <dir>` stopped scanning directories in Node 22+; the glob form
