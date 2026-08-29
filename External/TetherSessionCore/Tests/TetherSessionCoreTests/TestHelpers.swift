@@ -102,7 +102,11 @@ enum Spec {
                 return .legal(newPhase: .startingShell, commands: [.startShell], infoDiagnostic: false)
             case .bootstrapFailed(let msg):
                 let f = SessionFailure.bootstrapFailed(msg)
-                return .legal(newPhase: .failed(f), commands: [.showFailure(f)], infoDiagnostic: false)
+                return .legal(
+                    newPhase: .failed(f),
+                    commands: [.showFailure(f), .releaseWorkspaceScope],
+                    infoDiagnostic: false
+                )
             case .userRequestedClose:
                 return .legal(newPhase: .tearingDown, commands: [.releaseWorkspaceScope], infoDiagnostic: false)
             case .workspaceBecameUnavailable:
@@ -116,7 +120,11 @@ enum Spec {
         case .startingShell:
             switch event {
             case .shellStarted:
-                return .legal(newPhase: .active, commands: [], infoDiagnostic: false)
+                return .legal(
+                    newPhase: .active,
+                    commands: [.restoreSavedScrollback],
+                    infoDiagnostic: false
+                )
             case .ptyFailed(let msg):
                 let f = SessionFailure.ptyError(msg)
                 return .legal(newPhase: .failed(f),

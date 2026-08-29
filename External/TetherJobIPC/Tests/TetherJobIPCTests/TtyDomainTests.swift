@@ -106,7 +106,37 @@ final class TtyDomainTests: XCTestCase {
         let h = JIPTestHarness()
         h.session.pushResize(cols: 1, rows: 2)
         h.session.pushSignal("SIGINT")
+        h.session.pushStdin(Data("x".utf8))
         h.session.pushStdout(pid: 42, data: Data("x".utf8))
         XCTAssertTrue(h.received.isEmpty)
+    }
+
+    func testPushStdinEmitsTtyStdinEvent() {
+        let h = handshaken()
+        h.session.pushStdin(Data("hello".utf8))
+        let evt = h.messages(ofType: "tty.stdin").last
+        XCTAssertEqual(evt?.kind, "evt")
+        XCTAssertEqual(evt?.id, nil)
+        XCTAssertEqual(evt?.string("dataB64"), "aGVsbG8=")
+    }
+
+    func testPushStdinEmptyIsNotEOF() {
+        let h = handshaken()
+        h.session.pushStdin(Data())
+        XCTAssertTrue(h.messages(ofType: "tty.stdin").isEmpty,
+                      "idle/empty must not emit a frame; a terminal is not stdin EOF")
+    }
+
+    func testPushStdinSplitsAt64KiB() {
+        let h = handshaken()
+        let payload = Data(repeating: 0x61, count: 70_000)
+        h.session.pushStdin(payload)
+        let frames = h.messages(ofType: "tty.stdin")
+        XCTAssertEqual(frames.count, 2)
+        var reassembled = Data()
+        for frame in frames {
+            reassembled.append(Data(base64Encoded: frame.string("dataB64")!)!)
+        }
+        XCTAssertEqual(reassembled, payload)
     }
 }

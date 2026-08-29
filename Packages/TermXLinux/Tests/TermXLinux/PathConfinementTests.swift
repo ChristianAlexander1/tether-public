@@ -69,6 +69,24 @@ final class PathConfinementTests: XCTestCase {
         wait(for: [expectation], timeout: 5)
     }
 
+    func testWorkPathMapsTheSelectedFolder() throws {
+        let work = tmp.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        mapper.workHostRoot = work
+        let resolved = try mapper.hostPath(forGuestPath: "/work/src/main.c")
+        XCTAssertTrue(resolved.hasSuffix("/project/src/main.c"))
+        XCTAssertEqual(
+            try mapper.hostPath(forGuestPath: "/work"),
+            work.standardizedFileURL.resolvingSymlinksInPath().path
+        )
+    }
+
+    func testWorkPathRejectsEscapeAndPrefixCollision() {
+        mapper.workHostRoot = workspaces
+        XCTAssertThrowsError(try mapper.hostPath(forGuestPath: "/work/../outside/secret"))
+        XCTAssertThrowsError(try mapper.hostPath(forGuestPath: "/workish/file"))
+    }
+
     func testWorkspacesRootItselfResolves() throws {
         let resolved = try mapper.hostPath(forGuestPath: "/workspaces")
         XCTAssertFalse(resolved.isEmpty)

@@ -70,6 +70,70 @@ final class TermXUITests: XCTestCase {
         XCTAssertFalse(session.isRunning)
         XCTAssertNil(session.pid)
     }
+
+    func testRestoredOutputWaitsForTheRendererWithoutEnteringTranscript() {
+        let session = TerminalSession(cwd: "/tmp", engine: RecordingEngine())
+        let restored = Data("restored screen".utf8)
+        let delivered = expectation(description: "restored output delivered")
+
+        session.renderWithoutRecording(restored)
+        session.attachOutputHandler { data in
+            XCTAssertEqual(data, restored)
+            delivered.fulfill()
+        }
+
+        wait(for: [delivered], timeout: 2)
+        XCTAssertTrue(session.recentOutputTail(maxBytes: 1024).isEmpty)
+    }
+
+    func testDeliverEmulatorReplyIsConsumedByHostJobCallback() {
+        let session = TerminalSession(cwd: "/tmp", engine: RecordingEngine())
+        var captured: Data?
+        session.onEmulatorReply = { data in
+            captured = data
+            return true
+        }
+        let reply = Data([0x1B, 0x5B, 0x63])
+        XCTAssertTrue(session.deliverEmulatorReply(reply))
+        XCTAssertEqual(captured, reply)
+    }
+
+    func testDeliverEmulatorReplyIsDroppedDuringReplay() {
+        let session = TerminalSession(cwd: "/tmp", engine: RecordingEngine())
+        var called = false
+        session.onEmulatorReply = { _ in called = true; return true }
+        session.suppressQueryReplies = true
+        XCTAssertTrue(session.deliverEmulatorReply(Data([0x1B, 0x5B, 0x63])))
+        XCTAssertFalse(called)
+    }
+
+    func testWriteToPTYDoesNotFireOnKeystroke() throws {
+        let session = TerminalSession(cwd: "/tmp", engine: RecordingEngine())
+        let keystroke = expectation(description: "keystroke")
+        keystroke.isInverted = true
+        session.onKeystroke = { _ in keystroke.fulfill() }
+        _ = try session.start()
+        session.writeToPTY(Data([0x1B, 0x5B, 0x63]))
+        wait(for: [keystroke], timeout: 0.3)
+        session.terminate()
+    }
+
+    func testReplayBytesAreDeliveredSeparatelyFromLiveOutput() {
+        let session = TerminalSession(cwd: "/tmp", engine: RecordingEngine())
+        session.renderWithoutRecording(Data("REPLAY".utf8))
+        session.appendTranscriptForTesting(Data("LIVE".utf8))
+        // Live output after a handler exists uses deliverOutput; before attach,
+        // only pendingOutput (live) vs pendingReplay should stay distinct.
+        var chunks: [String] = []
+        let delivered = expectation(description: "both")
+        delivered.expectedFulfillmentCount = 1
+        session.attachOutputHandler { data in
+            chunks.append(String(decoding: data, as: UTF8.self))
+            if chunks.joined().contains("REPLAY") { delivered.fulfill() }
+        }
+        wait(for: [delivered], timeout: 2)
+        XCTAssertTrue(chunks.contains(where: { $0.contains("REPLAY") }))
+    }
 }
 
 #if canImport(Darwin)

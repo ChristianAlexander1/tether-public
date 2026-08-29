@@ -8,10 +8,11 @@ implementations.
 ## Runtime layout
 
 - `BlinkLinuxService` owns rootfs bootstrap, lifecycle and command execution.
-- `LinuxPathMapper` confines `/workspaces` mappings and rejects traversal and
+- `LinuxPathMapper` confines `/workspaces` and `/work` mappings and rejects traversal and
   symlink escape.
-- `EmbeddedBlinkRuntime` uses the real C bridge on iOS.
-- `HostBlinkRuntime` runs the built Blink CLI for macOS acceptance testing.
+- `EmbeddedBlinkRuntime` uses the real C bridge on iOS (Blink.xcframework) and on macOS when `TETHER_LINK_BLINK=1` links `Frameworks/.build/host/blink.a`. The iOS xcframework has no macOS slice; that flag is independent of the xcframework's presence. `termx_blink_run` restores host stdio after each one-shot guest so caller pipes can reach EOF.
+- `HostBlinkRuntime` runs the built Blink CLI for macOS acceptance testing when the embedded bridge is not linked. It cannot VfsMount `/work` or `/workspaces`.
+- `LinuxRootfsLayout` distinguishes an extracted Alpine tree (production `apk` path) from a fakefs store. Hostfs must not be pointed at `tetherfs.idx`.
 - `tether_dispatch_manifest.json` is the only guest/host policy list. Its
   default is `guest_elf`; only platform runtimes and desktop opener capabilities
   listed there are dispatched to app services.

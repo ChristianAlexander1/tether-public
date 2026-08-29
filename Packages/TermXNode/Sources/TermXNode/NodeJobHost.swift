@@ -16,7 +16,8 @@ struct NodeJobStdio {
     let stdinFD: Int32
     let stdoutFD: Int32
     let stderrFD: Int32
-    /// True when the job's stdin was bound to fd 0 by `withRedirectedIO`.
+    /// True when job stdin is a PTY. Live bytes are pumped over TJIP/2;
+    /// the slave is never dup2'd onto Node's fd 0.
     let stdinBound: Bool
 
     /// Which of the *child-visible* fds 0/1/2 are attached to a PTY.

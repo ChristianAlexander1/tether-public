@@ -31,6 +31,14 @@ final class LinuxTests: XCTestCase {
         XCTAssertThrowsError(try mapper.hostPath(forGuestPath: "/workspaces/escape/private"))
     }
 
+    func testGuestWorkPathRewrite() {
+        XCTAssertEqual(GuestWorkPath.hostPath("/work", workspace: "/Users/me/proj"), "/Users/me/proj")
+        XCTAssertEqual(GuestWorkPath.hostPath("/work/src", workspace: "/Users/me/proj"), "/Users/me/proj/src")
+        XCTAssertEqual(GuestWorkPath.hostPath("/tmp/x", workspace: "/Users/me/proj"), "/tmp/x")
+        XCTAssertFalse(GuestWorkPath.isGuest("/workish"))
+        XCTAssertEqual(GuestWorkPath.guestPath("/Users/me/proj/src", workspace: "/Users/me/proj"), "/work/src")
+    }
+
     func testGuestEnvironmentIsGenericAndDoesNotForgeToolConfiguration() {
         let env = LinuxEnvironment.guestEnviron(cwd: "/work", interactive: true)
         XCTAssertEqual(env["USER"], "root")
@@ -127,6 +135,72 @@ final class LinuxTests: XCTestCase {
         // or delete busybox while leaving the marker.
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: root.appendingPathComponent("bin/busybox").path)
+        )
+    }
+
+    func testRootfsLayoutDetectsFakefsIndexAndExtractedTrees() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tether-layout-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let extracted = tmp.appendingPathComponent("extracted", isDirectory: true)
+        let store = tmp.appendingPathComponent("fakefs", isDirectory: true)
+        try FileManager.default.createDirectory(at: extracted, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
+        XCTAssertEqual(LinuxRootfsLayout.detect(at: extracted), .extracted)
+        try Data("TFAKEFS1".utf8).write(to: store.appendingPathComponent("tetherfs.idx"))
+        XCTAssertEqual(LinuxRootfsLayout.detect(at: store), .fakefsStore)
+    }
+
+    /// Catches the TETHER_LINK_BLINK=1 + xcframework stub: if the env asks
+    /// for the real bridge, `termx_blink_is_available` must not be the stub.
+    func testLinkBlinkCompilesTheRealBridgeNotTheStub() throws {
+        let env = ProcessInfo.processInfo.environment
+        let requested = env["TETHER_LINK_BLINK"] == "1" || env["TERMX_LINK_BLINK"] == "1"
+        guard requested else { return }
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: BlinkPaths.hostArchive),
+            "TETHER_LINK_BLINK=1 requires \(BlinkPaths.hostArchive) (Frameworks/build-blink.sh)"
+        )
+        XCTAssertTrue(
+            BlinkEmbed.isAvailable,
+            "TETHER_LINK_BLINK=1 compiled TERMX_BLINK_STUB; macOS must link blink.a independently of Blink.xcframework"
+        )
+    }
+
+    /// `Package.swift` names the host archive as a string literal and
+    /// `build-blink.sh` installs it somewhere else entirely; nothing linked the
+    /// two, so the manifest pointed at a path the script never created and the
+    /// TETHER_LINK_BLINK lane silently linked nothing. Assert they agree.
+    func testManifestAndBuildScriptAgreeOnTheHostArchivePath() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // TermXLinux (tests)
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // TermXLinux (package)
+            .deletingLastPathComponent()   // Packages
+            .deletingLastPathComponent()   // repo root
+
+        let manifest = try String(
+            contentsOf: repoRoot.appendingPathComponent("Packages/TermXLinux/Package.swift"),
+            encoding: .utf8
+        )
+        let script = try String(
+            contentsOf: repoRoot.appendingPathComponent("Frameworks/build-blink.sh"),
+            encoding: .utf8
+        )
+
+        // The directory the manifest expects the archive in, relative to Frameworks/.
+        XCTAssertTrue(
+            manifest.contains(#".build/host/blink.a"#),
+            "Package.swift must point blinkLib at .build/host/blink.a — the directory build-blink.sh installs into"
+        )
+        // The directory the script actually installs into.
+        XCTAssertTrue(
+            script.contains(#"cp o/rel/blink/blink.a "$BUILD/host/""#),
+            "build-blink.sh must install blink.a into $BUILD/host/; if this moved, update Package.swift and BlinkPaths together"
+        )
+        XCTAssertTrue(
+            BlinkPaths.hostArchive.hasSuffix("/.build/host/blink.a"),
+            "BlinkPaths.hostArchive drifted from the manifest and the build script"
         )
     }
 }

@@ -72,10 +72,24 @@ public final class TermXIntegration {
         let launcher = ClaudeRuntimeProbe.launcherPath(home: home)
         let shim = ClaudeRuntimeProbe.shimPath(home: home)
         let js = ClaudeRuntimeProbe.applicationEntryPath(home: home)
-        var shimHasWhichFix = false
+        // What "current" means for the installed shim.
+        //
+        // This used to grep the shim for `openers.has(cmd)` — the hardcoded
+        // opener list. The bun-compat extraction deleted that list on purpose
+        // (Bun.which now does a real PATH scan in bun-compat/lib/which.js), so
+        // the probe reported "NO — rebuild app" on a perfectly current install,
+        // forever, and no rebuild could ever satisfy it. Check the invariant
+        // that actually holds today: the shim delegates to the bun-compat
+        // library, and that library is installed beside it.
+        var shimDelegatesToBunCompat = false
         if let shimText = try? String(contentsOfFile: shim, encoding: .utf8) {
-            shimHasWhichFix = shimText.contains("openers.has(cmd)")
+            shimDelegatesToBunCompat = shimText.contains("bun-compat/lib/index.js")
         }
+        let bunCompatWhichInstalled = fm.fileExists(
+            atPath: (shim as NSString).deletingLastPathComponent
+                + "/bun-compat/lib/which.js"
+        )
+        let shimIsCurrent = shimDelegatesToBunCompat && bunCompatWhichInstalled
         var lines: [String] = [
             "engine: Alpine Linux (Blink) primary",
             "TETHER_HOST_SHELL: \(ProcessInfo.processInfo.environment["TETHER_HOST_SHELL"] ?? ProcessInfo.processInfo.environment["TERMX_HOST_SHELL"] ?? "0")",
@@ -93,7 +107,7 @@ public final class TermXIntegration {
             "claude.bundle: \(ClaudeRuntimeProbe.usesSplitBundle(home: home) ? "split ESM graph" : (js != nil ? "single CommonJS" : "none"))",
             "claude.bun-shim: \(fm.fileExists(atPath: shim) ? "yes" : "no")",
             "browser.bridge: generic child-process opener",
-            "claude.shim.whichOpenFix: \(shimHasWhichFix ? "yes" : "NO — rebuild app")",
+            "claude.shim.bunCompat: \(shimIsCurrent ? "yes" : "NO — shim missing bun-compat delegation; reinstall Claude from Storage")",
             "claude.nodeModules: \(ClaudeRuntimeProbe.nodeModulesReady(home: home) ? "yes" : "no")",
             "claude.browserEnv: DISPLAY=:0 BROWSER=open (linux-extract OAuth)",
             "guest.identity: reported by the real Blink/Linux runtime",
@@ -136,6 +150,10 @@ public final class TermXIntegration {
             }
         }
         let service = EmbeddedNodeService(spawnExecutor: executor)
+        executor.registerGuestFallback { [weak self] request in
+            guard let self else { return 127 }
+            return self.runNestedGuest(request)
+        }
         _node = service
         return service
     }
@@ -248,6 +266,40 @@ public final class TermXIntegration {
         // shell; termx_blink_interrupt() during an idle prompt tears down the session.
     }
 
+    /// Nested guest ELF for a host-job spawn (`git`, `/bin/sh -c`, …) while
+    /// the login shell is waiting on that job. Never calls `termx_blink_run`
+    /// against the live login machine.
+    private func runNestedGuest(_ request: SpawnRequest) -> Int32 {
+        linux.runSync(request: request, write: { message in
+            let fd = request.stderrFD >= 0 ? request.stderrFD : request.stdoutFD
+            guard fd >= 0 else { return }
+            message.utf8CString.withUnsafeBufferPointer {
+                _ = write(fd, $0.baseAddress!, $0.count - 1)
+            }
+        })
+    }
+
+    /// Cooked-mode Ctrl-C for a host-proxied job: the kernel cannot deliver
+    /// SIGINT to Node (it is not in the PTY's process group), so we push
+    /// SIGINT over TJIP/2. Raw-mode programs receive the 0x03 byte on the
+    /// live stdin channel and count their own presses — including Claude's
+    /// native double-Ctrl-C.
+    public func handleHostJobKeystroke(_ data: Data) {
+        let raw = _node?.foregroundIsRaw == true
+        let name = HostJobKeystrokePolicy.signalName(for: data, foregroundIsRaw: raw)
+        guard let name else { return }
+        _node?.signalActiveJob(name)
+    }
+
+    /// SwiftTerm query replies (DA, XTVERSION) have no newline, so they never
+    /// emerge from a cooked PTY. An active host job takes them over TJIP stdin.
+    public func pushStdinToActiveHostJob(_ data: Data) -> Bool {
+        let active = _node?.hasActiveJob == true
+        guard active else { return false }
+        _node?.pushStdin(data)
+        return true
+    }
+
     /// curl/wget inside Alpine for guest-localhost in-app preview.
     private func fetchGuestLocalhost(_ url: URL) async -> SystemOpen.GuestFetchOutcome {
         if linux.isGuestMachineActive {
@@ -344,7 +396,9 @@ public final class TermXIntegration {
         name: String, argv: [String], env: [String: String],
         fds: (Int32, Int32, Int32)
     ) -> Int32 {
-        let hostCwd = env["TETHER_HOST_CWD"] ?? env["TERMX_HOST_CWD"] ?? env["PWD"] ?? "/"
+        let workspace = env["TETHER_HOST_CWD"] ?? env["TERMX_HOST_CWD"] ?? "/"
+        let rawCwd = env["PWD"] ?? workspace
+        let hostCwd = GuestWorkPath.hostPath(rawCwd, workspace: workspace)
         let sem = DispatchSemaphore(value: 0)
         let box = ExitCodeBox()
         // How this command is run comes from the registry, which merges the
@@ -599,3 +653,4 @@ private final class LinuxAdapter: ClaudeLinuxRunner {
 
     func interrupt() { service.interrupt() }
 }
+

@@ -106,6 +106,13 @@ public final class TerminalSession: ObservableObject, Identifiable {
         outputQueue.async { [weak self] in self?.deliverOutput(restore) }
     }
 
+    /// Repair terminal modes through the normal output path. Lifecycle
+    /// orchestration calls this before tearing down a shell that may have died
+    /// inside a full-screen program.
+    public func repairTerminalModes() {
+        restoreTerminalIfNeeded()
+    }
+
     /// Fired on the main queue when the guest shell exits, with its code.
     /// The lifecycle state machine turns this into `.shellExited`.
     public var onShellExited: ((Int32) -> Void)?
@@ -165,8 +172,40 @@ public final class TerminalSession: ObservableObject, Identifiable {
         // sequences (e.g. CSI ?1049l). Do not host-force-kill on repeated ^C.
         mirrorInputLog(data)
         outputQueue.async { [weak self] in
-            self?.onInput?(data)
+            guard let self else { return }
+            if self.hasLivePTYMaster {
+                self.writeMaster(data)
+                self.onKeystroke?(data)
+            } else {
+                self.onInput?(data)
+            }
         }
+    }
+
+    /// Write bytes to the PTY master without treating them as a user keystroke.
+    /// Terminal query replies (DA, XTVERSION, DECRQM) use this path.
+    public func writeToPTY(_ data: Data) {
+        guard !suppressQueryReplies else { return }
+        mirrorInputLog(data)
+        outputQueue.async { [weak self] in
+            guard let self else { return }
+            if self.hasLivePTYMaster {
+                self.writeMaster(data)
+            }
+        }
+    }
+
+    /// Deliver a terminal-query reply. Host-proxied jobs cannot read cooked
+    /// PTY input (no newline), so an active job takes the bytes over TJIP
+    /// stdin. The guest shell still receives replies through the PTY.
+    @discardableResult
+    public func deliverEmulatorReply(_ data: Data) -> Bool {
+        guard !suppressQueryReplies else { return true }
+        if let onEmulatorReply, onEmulatorReply(data) {
+            return true
+        }
+        writeToPTY(data)
+        return false
     }
 
     /// Records keystrokes heading into the PTY when `TETHER_PTY_LOG=1`.
@@ -209,6 +248,32 @@ public final class TerminalSession: ObservableObject, Identifiable {
     /// not sit under the guest's controlling terminal and therefore never see
     /// the kernel's SIGWINCH — can be told the new size.
     public var onResize: ((Int, Int) -> Void)?
+
+    /// Keystrokes after they have been written to the PTY master. Host jobs
+    /// use this to turn cooked-mode ^C into SIGINT without send() itself
+    /// interpreting bytes.
+    public var onKeystroke: ((Data) -> Void)?
+
+    /// Terminal-emulator replies (DA, XTVERSION, CPR, focus). Return true if
+    /// a host job consumed them over TJIP; otherwise they are written to the PTY.
+    public var onEmulatorReply: ((Data) -> Bool)?
+
+    /// When true, SwiftTerm/VT query replies are not written to the PTY.
+    /// Replay of a saved scrollback contains the CSI queries the old program
+    /// sent; answering them into the live shell types `1.20.0+v1.20.0;28c`
+    /// at the prompt and poisons the next host job's stdin.
+    public var suppressQueryReplies: Bool {
+        get { queryReplyLock.lock(); defer { queryReplyLock.unlock() }; return _suppressQueryReplies }
+        set { queryReplyLock.lock(); _suppressQueryReplies = newValue; queryReplyLock.unlock() }
+    }
+    private let queryReplyLock = NSLock()
+    private var _suppressQueryReplies = false
+    /// Flushes the output pump on the renderer thread after a replay so
+    /// SwiftTerm answers queries while `suppressQueryReplies` is still set.
+    public var flushOutputToRenderer: (() -> Void)?
+    /// Scrollback replay, kept apart from live PTY output so attach can feed
+    /// it with replies suppressed.
+    private var pendingReplay = Data()
 
     public func resize(cols: Int, rows: Int) {
         self.cols = max(1, cols)
@@ -289,10 +354,10 @@ public final class TerminalSession: ObservableObject, Identifiable {
         pair?.close()
     }
 
-    // MARK: - Test transcript (temporary — remove after debugging)
+    // MARK: - Bounded diagnostic transcript
 
     /// Rolling capture of everything written to the PTY (banner, typed echo, stdout/stderr,
-    /// errors). Used by the temporary “Copy log” button so a session can be pasted into chat.
+    /// errors). Used by “Copy log” and persisted scrollback diagnostics.
     private var transcript = Data()
     private static let transcriptCap = 2 * 1024 * 1024
 
@@ -342,7 +407,21 @@ public final class TerminalSession: ObservableObject, Identifiable {
     public func renderWithoutRecording(_ data: Data) {
         guard !data.isEmpty else { return }
         outputQueue.async { [weak self] in
-            self?.onOutput?(data)
+            guard let self else { return }
+            Self.mirrorPtyLog(data)
+            if let onOutput = self.onOutput {
+                self.suppressQueryReplies = true
+                onOutput(data)
+                DispatchQueue.main.async { [weak self] in
+                    self?.flushOutputToRenderer?()
+                    self?.suppressQueryReplies = false
+                }
+            } else {
+                self.pendingReplay.append(data)
+                if self.pendingReplay.count > Self.pendingOutputCap {
+                    self.pendingReplay.removeFirst(self.pendingReplay.count - Self.pendingOutputCap)
+                }
+            }
         }
     }
 
@@ -393,9 +472,19 @@ public final class TerminalSession: ObservableObject, Identifiable {
             guard let self else { return }
             self.onOutput = handler
             if !self.pendingOutput.isEmpty {
-                let buffered = self.pendingOutput
+                let live = self.pendingOutput
                 self.pendingOutput.removeAll()
-                handler(buffered)
+                handler(live)
+            }
+            if !self.pendingReplay.isEmpty {
+                let replay = self.pendingReplay
+                self.pendingReplay.removeAll()
+                self.suppressQueryReplies = true
+                handler(replay)
+                DispatchQueue.main.async { [weak self] in
+                    self?.flushOutputToRenderer?()
+                    self?.suppressQueryReplies = false
+                }
             }
         }
     }
@@ -454,6 +543,48 @@ public final class TerminalSession: ObservableObject, Identifiable {
     }
 
 #if canImport(Darwin)
+    private var hasLivePTYMaster: Bool {
+        readerLock.lock()
+        let master = pty?.master ?? -1
+        readerLock.unlock()
+        return master >= 0
+    }
+
+    private func writeMaster(_ data: Data) {
+        readerLock.lock()
+        let master = pty?.master ?? -1
+        let stopped = readerShouldStop
+        readerLock.unlock()
+        guard master >= 0, !stopped, !data.isEmpty else { return }
+        data.withUnsafeBytes { buffer in
+            guard let baseAddress = buffer.baseAddress else { return }
+            var remaining = data.count
+            var offset = 0
+            while remaining > 0 {
+                self.readerLock.lock()
+                let stoppedNow = self.readerShouldStop
+                self.readerLock.unlock()
+                if stoppedNow { return }
+                let written = Darwin.write(master, baseAddress.advanced(by: offset), remaining)
+                if written > 0 {
+                    offset += written
+                    remaining -= written
+                    continue
+                }
+                if written < 0 && (errno == EINTR || errno == EAGAIN) {
+                    usleep(2000)
+                    continue
+                }
+                return
+            }
+        }
+    }
+#else
+    private var hasLivePTYMaster: Bool { false }
+    private func writeMaster(_ data: Data) {}
+#endif
+
+#if canImport(Darwin)
     private func startPTYIO(master: Int32) {
         readerLock.lock()
         readerShouldStop = false
@@ -461,33 +592,11 @@ public final class TerminalSession: ObservableObject, Identifiable {
         readerFinished = finished
         readerLock.unlock()
 
+        // Captured master is only for the reader thread below. Writes go
+        // through writeMaster so query replies can skip onKeystroke.
         onInput = { [weak self] data in
-            guard let self else { return }
-            data.withUnsafeBytes { buffer in
-                guard let baseAddress = buffer.baseAddress else { return }
-                var remaining = data.count
-                var offset = 0
-                while remaining > 0 {
-                    self.readerLock.lock()
-                    let stopped = self.readerShouldStop
-                    self.readerLock.unlock()
-                    if stopped { return }
-
-                    let written = Darwin.write(master, baseAddress.advanced(by: offset), remaining)
-                    if written > 0 {
-                        offset += written
-                        remaining -= written
-                        continue
-                    }
-                    // EINTR/EAGAIN are transient; anything else (EIO once the slave is
-                    // gone) is permanent — give up instead of spinning forever.
-                    if written < 0 && (errno == EINTR || errno == EAGAIN) {
-                        usleep(2000)
-                        continue
-                    }
-                    return
-                }
-            }
+            self?.writeMaster(data)
+            self?.onKeystroke?(data)
         }
 
         DispatchQueue(label: "com.termx.session.pty-reader", qos: .userInitiated).async { [weak self] in

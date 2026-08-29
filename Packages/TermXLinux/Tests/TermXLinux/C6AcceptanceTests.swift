@@ -2,27 +2,38 @@ import XCTest
 @testable import TermXLinux
 
 /// Real Blink/Alpine acceptance suite; see docs/VALIDATION.md.
-/// Requires network + a built Blink host binary or embedded bridge (macOS).
+///
+/// Requires network. The embedded Blink VFS (`termx_blink_init`) is process-wide,
+/// so this class shares one bootstrapped service. Per-test scratch directories
+/// would leave later cases writing into the first rootfs.
 final class C6AcceptanceTests: XCTestCase {
-    private var scratch: URL!
-    private var service: BlinkLinuxService!
+    private static var sharedScratch: URL?
+    private static var sharedService: BlinkLinuxService?
+
+    private var scratch: URL { Self.sharedScratch! }
+    private var service: BlinkLinuxService { Self.sharedService! }
 
     override func setUpWithError() throws {
         guard ProcessInfo.processInfo.environment["TETHER_LINUX_NETWORK_TESTS"] == "1" else {
             throw XCTSkip("set TETHER_LINUX_NETWORK_TESTS=1 to run real Blink/Alpine acceptance tests")
         }
-        scratch = FileManager.default.temporaryDirectory
+        if Self.sharedService != nil { return }
+
+        let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("tether-c6-\(UUID().uuidString)", isDirectory: true)
         let rootfs = scratch.appendingPathComponent("rootfs", isDirectory: true)
         let workspaces = scratch.appendingPathComponent("workspaces", isDirectory: true)
         try FileManager.default.createDirectory(at: workspaces, withIntermediateDirectories: true)
-        service = BlinkLinuxService(rootfs: rootfs, workspacesHostRoot: workspaces)
+        Self.sharedScratch = scratch
+        Self.sharedService = BlinkLinuxService(rootfs: rootfs, workspacesHostRoot: workspaces)
     }
 
-    override func tearDownWithError() throws {
-        if let scratch {
+    override class func tearDown() {
+        if let scratch = sharedScratch {
             try? FileManager.default.removeItem(at: scratch)
         }
+        sharedScratch = nil
+        sharedService = nil
     }
 
     private func runGuest(_ cmdline: String, timeout: TimeInterval = 120) async throws -> (code: Int32, out: String, err: String) {
@@ -31,6 +42,13 @@ final class C6AcceptanceTests: XCTestCase {
         guard pipe(&outPipe) == 0, pipe(&errPipe) == 0 else {
             throw LinuxGuestError.bootstrapFailed("pipe() failed")
         }
+        // Drain while the guest runs. Waiting until exit fills the pipe and
+        // deadlocks apk/compilers; the embed lane also used to leak the write
+        // end onto process stdout, so a post-exit read never saw EOF.
+        let stdoutDrain = PipeDrain(fd: outPipe[0])
+        let stderrDrain = PipeDrain(fd: errPipe[0])
+        stdoutDrain.start()
+        stderrDrain.start()
 
         let argv = ["/bin/sh", "-c", cmdline]
         let runTask = Task {
@@ -63,38 +81,16 @@ final class C6AcceptanceTests: XCTestCase {
             group.cancelAll()
             return first
         }
-        let result: Int32
-        switch race {
-        case .completed(let code):
-            result = code
-        case .timedOut:
-            close(outPipe[0]); close(outPipe[1])
-            close(errPipe[0]); close(errPipe[1])
-            throw TimeoutError()
-        }
-
         close(outPipe[1])
         close(errPipe[1])
-
-        var outData = Data()
-        var buf = [UInt8](repeating: 0, count: 4096)
-        while true {
-            let n = read(outPipe[0], &buf, buf.count)
-            if n <= 0 { break }
-            outData.append(contentsOf: buf[0..<n])
+        let out = stdoutDrain.finish()
+        let err = stderrDrain.finish()
+        switch race {
+        case .completed(let code):
+            return (code, out, err)
+        case .timedOut:
+            throw TimeoutError()
         }
-        var errData = Data()
-        while true {
-            let n = read(errPipe[0], &buf, buf.count)
-            if n <= 0 { break }
-            errData.append(contentsOf: buf[0..<n])
-        }
-        close(outPipe[0])
-        close(errPipe[0])
-
-        let out = String(data: outData, encoding: .utf8) ?? ""
-        let err = String(data: errData, encoding: .utf8) ?? ""
-        return (result, out, err)
     }
 
     func testC6BootstrapAndBusyBoxSelfTest() async throws {
@@ -129,26 +125,86 @@ final class C6AcceptanceTests: XCTestCase {
         let pipe = try await runGuest("ls /bin | wc -l")
         XCTAssertEqual(pipe.code, 0, pipe.err)
         XCTAssertGreaterThan(Int(pipe.out.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0, 10)
+
+        // Two-stage pipeline must exit 0: the child's exit path used to
+        // longjmp into the parent's jmp_buf and print "Segmentation fault".
+        let echo = try await runGuest("echo hello | cat; echo status:$?")
+        XCTAssertEqual(echo.code, 0, echo.err)
+        XCTAssertTrue(echo.out.contains("hello"), echo.out)
+        XCTAssertTrue(echo.out.contains("status:0"), echo.out)
     }
 
-    func testC6WorkspacesMapping() async throws {
+    func testC6WorkspacesAndWorkBindMounts() async throws {
         try await service.bootstrap()
-        guard ProcessInfo.processInfo.environment["TERMX_BLINK_EMBED"] == "1" else {
-            throw XCTSkip("/workspaces VfsMount requires TERMX_BLINK_EMBED=1 with linked blink.a; host subprocess path does not bind mounts")
+        guard service.bindMountsAvailable else {
+            throw XCTSkip(
+                "bind mounts need the embedded Blink bridge: TETHER_LINK_BLINK=1 and Frameworks/.build/host/blink.a"
+            )
         }
 
         let demo = scratch.appendingPathComponent("workspaces/demo", isDirectory: true)
         try FileManager.default.createDirectory(at: demo, withIntermediateDirectories: true)
-        let guestFile = "/workspaces/demo/native.txt"
+        let work = scratch.appendingPathComponent("work", isDirectory: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        try service.bindWorkRoot(work.path)
 
-        let write = try await runGuest("echo guest-edited > \(guestFile)")
-        XCTAssertEqual(write.code, 0, write.err)
+        let wsWrite = try await runGuest("echo from-workspaces > /workspaces/demo/native.txt")
+        XCTAssertEqual(wsWrite.code, 0, wsWrite.err)
+        let wsHost = try service.mapHostPath("/workspaces/demo/native.txt")
+        XCTAssertTrue(
+            (try String(contentsOfFile: wsHost, encoding: .utf8)).contains("from-workspaces")
+        )
 
-        let hostPath = try service.mapHostPath(guestFile)
-        let content = try String(contentsOfFile: hostPath, encoding: .utf8)
-        XCTAssertTrue(content.contains("guest-edited"))
+        let workWrite = try await runGuest("echo from-work > /work/native.txt")
+        XCTAssertEqual(workWrite.code, 0, workWrite.err)
+        let workHost = try service.mapHostPath("/work/native.txt")
+        XCTAssertTrue(
+            (try String(contentsOfFile: workHost, encoding: .utf8)).contains("from-work")
+        )
+        XCTAssertEqual(
+            (try String(contentsOf: work.appendingPathComponent("native.txt"), encoding: .utf8))
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            "from-work"
+        )
     }
-
 }
 
 private struct TimeoutError: Error {}
+
+/// Reads a pipe on a background thread until EOF. Closing the write end is
+/// what unblocks `finish()`; do not wait for the guest to exit first.
+private final class PipeDrain: @unchecked Sendable {
+    private let fd: Int32
+    private let lock = NSLock()
+    private var data = Data()
+    private var thread: Thread?
+
+    init(fd: Int32) { self.fd = fd }
+
+    func start() {
+        let thread = Thread { [weak self] in
+            guard let self else { return }
+            var buf = [UInt8](repeating: 0, count: 4096)
+            while true {
+                let n = read(self.fd, &buf, buf.count)
+                if n <= 0 { break }
+                self.lock.lock()
+                self.data.append(contentsOf: buf[0..<n])
+                self.lock.unlock()
+            }
+            close(self.fd)
+        }
+        thread.qualityOfService = .utility
+        self.thread = thread
+        thread.start()
+    }
+
+    func finish() -> String {
+        while thread?.isFinished == false {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+}

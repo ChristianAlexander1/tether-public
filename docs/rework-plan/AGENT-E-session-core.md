@@ -82,6 +82,7 @@ public enum SessionCommand: Equatable, Sendable {
     case startBootstrap
     case startShell
     case emitRestoreSequence
+    case restoreSavedScrollback
     case snapshotScrollback
     case stopOutputPump
     case signalShell(String)
@@ -126,7 +127,7 @@ commands. Anything not listed is illegal (→ `[]` + diagnostic).
 | Event | New phase | Commands |
 |---|---|---|
 | `bootstrapSucceeded` | `startingShell` | `[.startShell]` |
-| `bootstrapFailed(msg)` | `failed(.bootstrapFailed(msg))` | `[.showFailure(...)]` |
+| `bootstrapFailed(msg)` | `failed(.bootstrapFailed(msg))` | `[.showFailure(...), .releaseWorkspaceScope]` |
 | `userRequestedClose` | `tearingDown` | `[.releaseWorkspaceScope]` then the machine expects `teardownFinished` |
 | `workspaceBecameUnavailable` | `failed(.workspaceUnavailable)` | `[.showFailure(...), .releaseWorkspaceScope]` |
 
@@ -134,7 +135,7 @@ commands. Anything not listed is illegal (→ `[]` + diagnostic).
 
 | Event | New phase | Commands |
 |---|---|---|
-| `shellStarted` | `active` | `[]` |
+| `shellStarted` | `active` | `[.restoreSavedScrollback]` |
 | `ptyFailed(msg)` | `failed(.ptyError(msg))` | `[.showFailure(...), .releaseWorkspaceScope]` |
 | `shellExited(code)` | `failed(.engineCrashed(exitCode: code))` | `[.showFailure(...), .stopOutputPump, .closePTYAfterReaderStops, .releaseWorkspaceScope]` |
 | `userRequestedClose` | `tearingDown` | full teardown sequence (below) |
@@ -183,7 +184,9 @@ commands. Anything not listed is illegal (→ `[]` + diagnostic).
 
 Ordering rationale you must preserve (and state in doc comments):
 `snapshotScrollback` before `emitRestoreSequence` (snapshot captures the TUI
-screen, restore cleans it); `signalShell` before `waitForEngineExit` before
+bytes and mode repair, then the live renderer is repaired); saved snapshot
+replay is the distinct startup command `restoreSavedScrollback`;
+`signalShell` before `waitForEngineExit` before
 `stopOutputPump` before `closePTYAfterReaderStops` (drain output, stop the
 reader, only then close descriptors); `releaseWorkspaceScope` always last.
 

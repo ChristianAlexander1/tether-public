@@ -2,17 +2,25 @@ import Foundation
 import TermXBlinkBridge
 
 protocol LinuxRuntime: AnyObject {
+    /// True when `mount` is a real VfsMount into the embedded Blink guest.
+    var supportsBindMounts: Bool { get }
     func prepare(rootfs: URL, mapper: LinuxPathMapper) throws
+    func mount(hostPath: String, guestPath: String) throws
     func run(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool, shouldInterrupt: @escaping () -> Bool) async -> Int32
+    /// Run a guest ELF without replacing the login-shell machine.
+    func runNested(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool) -> Int32
     func interrupt()
     func terminate()
 }
 
 enum LinuxRuntimeFactory {
     static func make(rootfs: URL, mapper: LinuxPathMapper) -> LinuxRuntime {
-        let environment = ProcessInfo.processInfo.environment
-        if (environment["TETHER_BLINK_EMBED"] ?? environment["TERMX_BLINK_EMBED"]) == "1",
-           BlinkEmbed.isAvailable {
+        // The real C bridge is preferred whenever it is actually linked.
+        // TETHER_BLINK_EMBED=1 used to be required as well, which hid the
+        // bind-mount path: macOS compiled TERMX_BLINK_STUB whenever the iOS
+        // xcframework existed, so isAvailable stayed false and this factory
+        // always fell through to the host CLI (no VfsMount).
+        if BlinkEmbed.isAvailable {
             return EmbeddedBlinkRuntime(mapper: mapper)
         }
         #if os(macOS)
@@ -44,6 +52,9 @@ enum BlinkPaths {
             return override
         }
         let candidates = [
+            // build-blink.sh installs here; the legacy .build/blink/host path
+            // is kept below for checkouts built by an older script.
+            frameworksRoot + "/.build/host/blink",
             frameworksRoot + "/.build/blink/host/blink",
             frameworksRoot + "/.build/blink-src/o/rel/blink/blink",
             "/usr/local/bin/blink",
@@ -56,6 +67,11 @@ enum BlinkPaths {
         ProcessInfo.processInfo.environment["TETHER_BLINK_XCFRAMEWORK"]
             ?? ProcessInfo.processInfo.environment["TERMX_BLINK_XCFRAMEWORK"]
             ?? frameworksRoot + "/Blink.xcframework"
+    }
+
+    /// Host static library installed by `Frameworks/build-blink.sh`.
+    static var hostArchive: String {
+        frameworksRoot + "/.build/host/blink.a"
     }
 }
 
@@ -70,26 +86,36 @@ final class EmbeddedBlinkRuntime: LinuxRuntime {
     private var rootfsPath: String = ""
     private var prepared = false
 
+    var supportsBindMounts: Bool { BlinkEmbed.isAvailable }
+
     init(mapper: LinuxPathMapper) {
         self.mapper = mapper
     }
 
     func prepare(rootfs: URL, mapper: LinuxPathMapper) throws {
+        switch LinuxRootfsLayout.detect(at: rootfs) {
+        case .extracted:
+            break
+        case .fakefsStore:
+            throw LinuxGuestError.bootstrapFailed(
+                "\(rootfs.path) is a fakefs store; Blink hostfs cannot represent its device nodes. Production apk uses the extracted rootfs; overlay VFS is the remaining mount."
+            )
+        }
         rootfsPath = rootfs.path
         let rc = termx_blink_init(rootfsPath)
         guard rc == 0 else { throw LinuxGuestError.bootstrapFailed("termx_blink_init: \(rc)") }
 
         try FileManager.default.createDirectory(at: mapper.workspacesHostRoot, withIntermediateDirectories: true)
-        let mountWS = termx_blink_mount(mapper.workspacesHostRoot.path, mapper.guestWorkspacesPath)
-        guard mountWS == 0 else {
-            throw LinuxGuestError.mountFailed("/workspaces (\(mountWS))")
-        }
-
-        let mountHome = termx_blink_mount(mapper.homeHostRoot.path, mapper.guestHomePath)
-        guard mountHome == 0 else {
-            throw LinuxGuestError.mountFailed("/root (\(mountHome))")
-        }
+        try mount(hostPath: mapper.workspacesHostRoot.path, guestPath: mapper.guestWorkspacesPath)
+        try mount(hostPath: mapper.homeHostRoot.path, guestPath: mapper.guestHomePath)
         prepared = true
+    }
+
+    func mount(hostPath: String, guestPath: String) throws {
+        let rc = termx_blink_mount(hostPath, guestPath)
+        guard rc == 0 else {
+            throw LinuxGuestError.mountFailed("\(guestPath) (\(rc))")
+        }
     }
 
     func run(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool, shouldInterrupt: @escaping () -> Bool) async -> Int32 {
@@ -114,6 +140,22 @@ final class EmbeddedBlinkRuntime: LinuxRuntime {
         }
     }
 
+    func runNested(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool) -> Int32 {
+        guard prepared, let prog = argv.first else { return 127 }
+        let size = LinuxEnvironment.windowSize(fd: stdoutFD)
+            ?? LinuxEnvironment.windowSize(fd: stdinFD)
+        var env = LinuxEnvironment.guestEnviron(
+            cwd: cwd, interactive: interactive,
+            cols: size?.cols, rows: size?.rows
+        )
+        let envp = LinuxEnvironment.cEnvp(&env)
+        let argp = LinuxEnvironment.cArgv(argv)
+        let code = termx_blink_run_nested(prog, argp, envp, stdinFD, stdoutFD, stderrFD)
+        LinuxEnvironment.freeCStrings(argp)
+        LinuxEnvironment.freeCStrings(envp)
+        return code >= 0 ? code : 127
+    }
+
     func interrupt() {
         termx_blink_interrupt()
     }
@@ -130,6 +172,8 @@ final class HostBlinkRuntime: LinuxRuntime, @unchecked Sendable {
     private var process: Process?
     private let processLock = NSLock()
 
+    var supportsBindMounts: Bool { false }
+
     init(rootfs: URL, mapper: LinuxPathMapper) {
         self.rootfs = rootfs
         self.mapper = mapper
@@ -141,6 +185,12 @@ final class HostBlinkRuntime: LinuxRuntime, @unchecked Sendable {
         }
         _ = rootfs
         _ = mapper
+    }
+
+    func mount(hostPath: String, guestPath: String) throws {
+        _ = hostPath
+        _ = guestPath
+        throw LinuxGuestError.mountFailed("\(guestPath) (host blink CLI has no VfsMount)")
     }
 
     func run(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool, shouldInterrupt: @escaping () -> Bool) async -> Int32 {
@@ -235,6 +285,21 @@ final class HostBlinkRuntime: LinuxRuntime, @unchecked Sendable {
         let runningProcess = process
         processLock.unlock()
         runningProcess?.terminate()
+    }
+
+    func runNested(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool) -> Int32 {
+        let sem = DispatchSemaphore(value: 0)
+        var code: Int32 = 127
+        Task {
+            code = await run(
+                argv: argv, cwd: cwd,
+                stdinFD: stdinFD, stdoutFD: stdoutFD, stderrFD: stderrFD,
+                interactive: interactive, shouldInterrupt: { false }
+            )
+            sem.signal()
+        }
+        sem.wait()
+        return code
     }
 
     private static func forward(_ source: FileHandle, to targetFD: Int32) {

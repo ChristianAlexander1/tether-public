@@ -177,6 +177,43 @@ typedef void (*tether_fakefs_report_cb)(const char *path, const char *problem,
 int tether_fakefs_verify(const tether_fakefs *fs,
                          tether_fakefs_report_cb report, void *user);
 
+/* ------------------------------------------------------------------ */
+/* Writable overlay (copy-up + whiteouts)                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A read-write view of a fakefs store. The lower store stays immutable;
+ * every mutation lands in `upper_dir` as a regular host tree. Overlayfs
+ * whiteouts (`.wh.<basename>`) hide lower entries. Reads prefer upper,
+ * then lower, and fail with -ENOENT when a whiteout is present.
+ *
+ * This is the writable layer `apk` and guest installs need when the
+ * production extracted rootfs is not in use.
+ */
+typedef struct tether_fakefs_rw tether_fakefs_rw;
+
+tether_fakefs_rw *tether_fakefs_overlay_open(const char *lower_dir,
+                                             const char *upper_dir,
+                                             char *errbuf, size_t errlen);
+void tether_fakefs_overlay_close(tether_fakefs_rw *rw);
+
+int tether_fakefs_overlay_stat(const tether_fakefs_rw *rw, const char *path,
+                               tether_fakefs_stat *st);
+ssize_t tether_fakefs_overlay_read(const tether_fakefs_rw *rw, const char *path,
+                                   void *buf, size_t len, uint64_t offset);
+ssize_t tether_fakefs_overlay_write(tether_fakefs_rw *rw, const char *path,
+                                    const void *buf, size_t len, uint64_t offset);
+int tether_fakefs_overlay_mkdir(tether_fakefs_rw *rw, const char *path, uint32_t mode);
+int tether_fakefs_overlay_unlink(tether_fakefs_rw *rw, const char *path);
+int tether_fakefs_overlay_create(tether_fakefs_rw *rw, const char *path,
+                                 uint32_t mode);
+int tether_fakefs_overlay_rename(tether_fakefs_rw *rw, const char *from,
+                                 const char *to);
+int tether_fakefs_overlay_readdir(const tether_fakefs_rw *rw, const char *dirpath,
+                                  tether_fakefs_dirent_cb cb, void *user);
+int tether_fakefs_overlay_open_fd(tether_fakefs_rw *rw, const char *path,
+                                  int flags);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

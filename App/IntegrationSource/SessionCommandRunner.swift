@@ -13,8 +13,10 @@ public protocol SessionServices: AnyObject {
     /// Spawn the guest engine and attach the PTY reader. Must report back with
     /// `.shellStarted` / `.ptyFailed`.
     func startShell(completion: @escaping (Result<Void, Error>) -> Void)
-    /// Re-render the screen from the most recent snapshot.
+    /// Emit any reset sequence owed by the currently rendered terminal modes.
     func emitRestoreSequence()
+    /// Replay a validated scrollback snapshot after the new PTY is attached.
+    func restoreSavedScrollback()
     /// Serialize the current scrollback and persist it.
     func snapshotScrollback()
     /// Stop the reader thread and join it.
@@ -97,6 +99,8 @@ public final class SessionCommandRunner {
             }
         case .emitRestoreSequence:
             services.emitRestoreSequence()
+        case .restoreSavedScrollback:
+            services.restoreSavedScrollback()
         case .snapshotScrollback:
             services.snapshotScrollback()
         case .stopOutputPump:

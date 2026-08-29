@@ -28,7 +28,7 @@ final class TransitionTableTests: XCTestCase {
         XCTAssertEqual(m.phase, .startingShell)
 
         // startingShell -> active
-        XCTAssertEqual(m.handle(.shellStarted), [])
+        XCTAssertEqual(m.handle(.shellStarted), [.restoreSavedScrollback])
         XCTAssertEqual(m.phase, .active)
 
         // active -> tearingDown (full teardown, verbatim)
@@ -147,7 +147,7 @@ final class TransitionTableTests: XCTestCase {
         // Bootstrap simply continues (iOS grants background time during bootstrap).
         XCTAssertEqual(m.handle(.bootstrapSucceeded), [.startShell])
         XCTAssertEqual(m.phase, .startingShell)
-        XCTAssertEqual(m.handle(.shellStarted), [])
+        XCTAssertEqual(m.handle(.shellStarted), [.restoreSavedScrollback])
         // Shell is live before any suspension is possible.
         XCTAssertEqual(m.phase, .active)
     }
@@ -163,7 +163,7 @@ final class TransitionTableTests: XCTestCase {
         XCTAssertEqual(m.phase, .startingShell)
         XCTAssertEqual(m.diagnostics.count, diagCount + 1)
 
-        XCTAssertEqual(m.handle(.shellStarted), [])
+        XCTAssertEqual(m.handle(.shellStarted), [.restoreSavedScrollback])
         XCTAssertEqual(m.phase, .active)
     }
 
@@ -212,7 +212,10 @@ final class TransitionTableTests: XCTestCase {
         // bootstrapFailed -> failed + showFailure
         let failCmds = m.handle(.bootstrapFailed("no init"))
         XCTAssertEqual(m.phase, .failed(.bootstrapFailed("no init")))
-        XCTAssertEqual(failCmds, [.showFailure(.bootstrapFailed("no init"))])
+        XCTAssertEqual(
+            failCmds,
+            [.showFailure(.bootstrapFailed("no init")), .releaseWorkspaceScope]
+        )
 
         // failed -> retry -> bootstrapping -> bootstrapSucceeded...
         _ = m.handle(.retryRequested)

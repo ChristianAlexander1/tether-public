@@ -33,6 +33,7 @@ endif()
 add_library(tether_fakefs
   src/tether_fakefs.c
   src/tether_fakefs_create.c
+  src/tether_fakefs_overlay.c
   src/tether_path.c
   src/tether_crc32.c)
 target_include_directories(tether_fakefs PUBLIC
@@ -69,6 +70,7 @@ tether_add_test(t1_create  test_create.c)   # T1: create from bundled tarball
 tether_add_test(t2_read    test_read.c)     # T2: read known file bytes
 tether_add_test(t3_symlink test_symlink.c)  # T3: symlink resolution
 tether_add_test(t4_verify  test_verify.c)   # T4: verify 1000 paths + CRC
+tether_add_test(t5_overlay test_overlay.c)  # T5: copy-up writes + whiteouts
 
 # T1 (CLI flavor): the shipped binaries themselves must exit 0
 add_test(NAME t1_cli_fakefsify

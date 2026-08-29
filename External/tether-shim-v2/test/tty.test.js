@@ -288,3 +288,55 @@ test('tty: WriteStream.getColorDepth uses the stream fd, module fn uses stdout',
   assert.equal(ws.hasColors(256, { TERM: 'xterm-256color' }), true);
   ws.destroy();
 });
+
+// Regression: Ink enters raw mode as
+//   stdin.ref(); stdin.setRawMode(true); stdin.addListener('readable', …)
+// in one comma expression. A missing ref() threw before either of the other
+// two ran, so Claude Code mounted with no input listener and never wrote a
+// frame — a blank terminal with no error anywhere.
+test('tty: ReadStream carries the net.Socket ref/unref/destroySoon surface', async () => {
+  await session;
+  const tty = require('../lib/tty');
+  const stdin = new tty.ReadStream(0);
+  assert.equal(typeof stdin.ref, 'function', 'ref() must exist');
+  assert.equal(typeof stdin.unref, 'function', 'unref() must exist');
+  assert.equal(typeof stdin.destroySoon, 'function', 'destroySoon() must exist');
+  assert.equal(stdin.ref(), stdin, 'ref() is chainable');
+  assert.equal(stdin.unref(), stdin, 'unref() is chainable');
+  // The full Ink raw-mode entry sequence must complete without throwing.
+  stdin.setEncoding('utf8');
+  stdin.ref();
+  stdin.setRawMode(true);
+  stdin.addListener('readable', () => {});
+  assert.equal(stdin.isRaw, true, 'raw mode was reached, not skipped by a throw');
+  stdin.destroy();
+});
+
+test('tty: process.stdin exposes ref/unref once the live stdin is installed', async () => {
+  await session;
+  assert.equal(typeof process.stdin.ref, 'function', 'process.stdin.ref() must exist');
+  assert.equal(typeof process.stdin.unref, 'function', 'process.stdin.unref() must exist');
+  assert.equal(process.stdin.ref(), process.stdin, 'ref() is chainable');
+});
+
+test('tty: WriteStream writes its bytes to the fd instead of discarding them', async () => {
+  await session;
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tty = require('../lib/tty');
+  const file = path.join(os.tmpdir(), `tether-tty-write-${process.pid}.txt`);
+  const fd = fs.openSync(file, 'w+');
+  try {
+    const out = new tty.WriteStream(fd);
+    out.write('frame-one');
+    out.write(Buffer.from('[?25l'));
+    assert.equal(fs.readFileSync(file, 'utf8'), 'frame-one[?25l',
+      'bytes reach the descriptor; a discarding _write is a silent black hole');
+    assert.equal(typeof out.ref, 'function', 'ref() must exist');
+    assert.equal(out.unref(), out, 'unref() is chainable');
+  } finally {
+    fs.closeSync(fd);
+    fs.rmSync(file, { force: true });
+  }
+});

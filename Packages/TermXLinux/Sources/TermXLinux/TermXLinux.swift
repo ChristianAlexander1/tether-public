@@ -21,7 +21,34 @@ public enum LinuxGuestError: Error, Equatable {
     case mountFailed(String)
 }
 
-// MARK: - Path mapping (/workspaces)
+// MARK: - Path mapping (/work, /workspaces)
+
+/// Guest `/work` is the selected iOS workspace; host Node sees the Darwin path
+/// via `TETHER_HOST_CWD`. Rewrite either direction without string-prefix traps
+/// (`/workish` is not `/work`).
+public enum GuestWorkPath {
+    public static let guestRoot = "/work"
+
+    public static func isGuest(_ path: String) -> Bool {
+        path == guestRoot || path.hasPrefix(guestRoot + "/")
+    }
+
+    public static func hostPath(_ path: String, workspace: String) -> String {
+        let ws = URL(fileURLWithPath: workspace).standardizedFileURL.path
+        guard isGuest(path) else { return path }
+        if path == guestRoot { return ws }
+        return ws + String(path.dropFirst(guestRoot.count))
+    }
+
+    public static func guestPath(_ path: String, workspace: String) -> String {
+        if isGuest(path) { return path }
+        let ws = URL(fileURLWithPath: workspace).standardizedFileURL.path
+        let p = URL(fileURLWithPath: path).standardizedFileURL.path
+        if p == ws { return guestRoot }
+        if p.hasPrefix(ws + "/") { return guestRoot + String(p.dropFirst(ws.count)) }
+        return path
+    }
+}
 
 /// `StorageFileSystem` over a real host directory, used only to answer the
 /// symlink and existence questions `ConfinedPathResolver` asks while walking a
@@ -78,14 +105,24 @@ final class HostDirectoryFileSystem: StorageFileSystem {
 public struct LinuxPathMapper {
     public let workspacesHostRoot: URL
     public let homeHostRoot: URL
+    /// Selected iOS folder, bind-mounted at `/work`. Nil until login mounts it.
+    public var workHostRoot: URL?
 
-    public init(workspacesHostRoot: URL, homeHostRoot: URL) {
+    public init(workspacesHostRoot: URL, homeHostRoot: URL, workHostRoot: URL? = nil) {
         self.workspacesHostRoot = workspacesHostRoot
         self.homeHostRoot = homeHostRoot
+        self.workHostRoot = workHostRoot
     }
 
-    /// Validates a guest-visible path under `/workspaces`.
+    /// Validates a guest-visible path under `/workspaces` or `/work`.
     public func validateGuestPath(_ path: String) throws -> String {
+        if GuestWorkPath.isGuest(path) {
+            let normalised = URL(fileURLWithPath: path).standardizedFileURL.path
+            guard GuestWorkPath.isGuest(normalised) else {
+                throw LinuxGuestError.invalidGuestPath
+            }
+            return normalised
+        }
         guard path == guestWorkspacesPath || path.hasPrefix(guestWorkspacesPath + "/") else {
             throw LinuxGuestError.invalidGuestPath
         }
@@ -100,7 +137,7 @@ public struct LinuxPathMapper {
         return normalised
     }
 
-    /// Maps `/workspaces/<name>/…` to a host filesystem path for native reads.
+    /// Maps `/work/…` or `/workspaces/<name>/…` to a host filesystem path.
     ///
     /// Confinement is delegated to `ConfinedPathResolver`, which checks **every
     /// traversed component** for a symlink rather than only the leaf, bounds
@@ -109,10 +146,22 @@ public struct LinuxPathMapper {
     /// `/workspaces` prefix test). The public API here is unchanged.
     public func hostPath(forGuestPath guestPath: String) throws -> String {
         let validated = try validateGuestPath(guestPath)
-        let suffix = validated.dropFirst(guestWorkspacesPath.count)
+        if GuestWorkPath.isGuest(validated) {
+            guard let work = workHostRoot else { throw LinuxGuestError.invalidGuestPath }
+            return try confinedHostPath(
+                guestPath: validated, guestPrefix: GuestWorkPath.guestRoot, hostRoot: work
+            )
+        }
+        return try confinedHostPath(
+            guestPath: validated, guestPrefix: guestWorkspacesPath, hostRoot: workspacesHostRoot
+        )
+    }
+
+    private func confinedHostPath(guestPath: String, guestPrefix: String, hostRoot: URL) throws -> String {
+        let suffix = guestPath.dropFirst(guestPrefix.count)
         let trimmed = suffix.hasPrefix("/") ? String(suffix.dropFirst()) : String(suffix)
 
-        let root = workspacesHostRoot.standardizedFileURL.resolvingSymlinksInPath()
+        let root = hostRoot.standardizedFileURL.resolvingSymlinksInPath()
         guard !trimmed.isEmpty else { return root.path }
 
         // The resolver addresses the file system by the same component list it
@@ -125,9 +174,6 @@ public struct LinuxPathMapper {
         )
         switch resolver.resolve(trimmed) {
         case .success:
-            // The resolver confirmed the path stays inside the root. Return the
-            // lexical candidate: callers open the path they asked for, not a
-            // symlink-flattened rewrite of it.
             return root.appendingPathComponent(trimmed).standardizedFileURL.path
         case .failure:
             throw LinuxGuestError.invalidGuestPath
@@ -136,6 +182,21 @@ public struct LinuxPathMapper {
 
     public var guestWorkspacesPath: String { "/workspaces" }
     public var guestHomePath: String { "/root" }
+}
+
+/// On-disk shape of the Alpine root Blink will boot.
+///
+/// Production `apk` uses an extracted host tree (`extracted`). A fakefs store
+/// (`tetherfs.idx` + `data/`) is the iOS-container form; Blink must not treat
+/// that directory as hostfs — device nodes live in the index, not on disk.
+public enum LinuxRootfsLayout: Equatable {
+    case extracted
+    case fakefsStore
+
+    public static func detect(at root: URL) -> LinuxRootfsLayout {
+        let idx = root.appendingPathComponent("tetherfs.idx")
+        return FileManager.default.fileExists(atPath: idx.path) ? .fakefsStore : .extracted
+    }
 }
 
 // MARK: - Alpine bootstrap
@@ -246,7 +307,7 @@ public enum LinuxFallback {
 public final class BlinkLinuxService: LinuxGuestRuntime {
     public private(set) var state: LinuxGuestState = .needsBootstrap
     public let rootfs: URL
-    public let pathMapper: LinuxPathMapper
+    public private(set) var pathMapper: LinuxPathMapper
     private let runtime: LinuxRuntime
     private var interrupted = false
     private let lock = NSLock()
@@ -385,6 +446,39 @@ public final class BlinkLinuxService: LinuxGuestRuntime {
         runtime.interrupt()
     }
 
+    /// Whether guest `/work` and `/workspaces` are real VfsMounts into Blink.
+    /// False on the host CLI lane, which has no bind-mount support.
+    public var bindMountsAvailable: Bool { runtime.supportsBindMounts }
+
+    /// Bind the selected iOS folder at `/work`. Updates the host-path mapper
+    /// always; VfsMounts when the embedded bridge is linked.
+    public func bindWorkRoot(_ hostPath: String) throws {
+        let url = URL(fileURLWithPath: hostPath).standardizedFileURL
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        pathMapper.workHostRoot = url
+        guard runtime.supportsBindMounts else { return }
+        try runtime.mount(hostPath: url.path, guestPath: GuestWorkPath.guestRoot)
+    }
+
+    /// Execute a guest ELF without replacing the login-shell machine.
+    /// Used when host-proxied Node (or any host job) spawnSyncs `git` /
+    /// `/bin/sh -c` while the Alpine shell is waiting on that job.
+    public func runNested(argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32, interactive: Bool) -> Int32 {
+        guard !argv.isEmpty else { return 127 }
+        var argv = argv
+        if !argv[0].contains("/") {
+            guard let resolved = LinuxFallback.guestCommandPath(name: argv[0], rootfs: rootfs) else {
+                return 127
+            }
+            argv[0] = resolved
+        }
+        return runtime.runNested(
+            argv: argv, cwd: cwd,
+            stdinFD: stdinFD, stdoutFD: stdoutFD, stderrFD: stderrFD,
+            interactive: interactive
+        )
+    }
+
     public func terminate() {
         lock.lock()
         interrupted = true
@@ -417,20 +511,77 @@ public final class BlinkLinuxService: LinuxGuestRuntime {
         if argv.first == "linux" {
             let guestArgv = Array(argv.dropFirst())
             if guestArgv.isEmpty {
-                return runSync(argv: ["/bin/sh"], cwd: request.cwd, stdinFD: request.stdinFD, stdoutFD: request.stdoutFD, stderrFD: request.stderrFD, interactive: request.interactive)
+                return dispatchGuest(
+                    ["/bin/sh"], cwd: request.cwd,
+                    stdinFD: request.stdinFD, stdoutFD: request.stdoutFD, stderrFD: request.stderrFD,
+                    interactive: request.interactive, write: write
+                )
             }
-            return runSync(argv: guestArgv, cwd: request.cwd, stdinFD: request.stdinFD, stdoutFD: request.stdoutFD, stderrFD: request.stderrFD, interactive: request.interactive)
+            return dispatchGuest(
+                guestArgv, cwd: request.cwd,
+                stdinFD: request.stdinFD, stdoutFD: request.stdoutFD, stderrFD: request.stderrFD,
+                interactive: request.interactive, write: write
+            )
         }
 
-        // Bare-name fallthrough: `git status` runs the guest's /usr/bin/git.
-        if let guestPath = LinuxFallback.guestCommandPath(name: argv[0], rootfs: rootfs) {
-            var resolved = argv
+        return dispatchGuest(
+            argv, cwd: request.cwd,
+            stdinFD: request.stdinFD, stdoutFD: request.stdoutFD, stderrFD: request.stderrFD,
+            interactive: request.interactive, write: write
+        )
+    }
+
+    /// Resolve a command to a guest ELF and run it. While the login shell owns
+    /// Blink's machine, this uses the nested channel so `/bin/sh -c` from a
+    /// host job cannot hang the session.
+    private func dispatchGuest(
+        _ argv: [String], cwd: String, stdinFD: Int32, stdoutFD: Int32, stderrFD: Int32,
+        interactive: Bool, write: (String) -> Void
+    ) -> Int32 {
+        guard let resolved = resolveGuestArgv(argv) else {
+            write("\(argv.first ?? ""): command not found\n")
+            return 127
+        }
+        let guestCwd = guestCwd(from: cwd)
+        if isGuestMachineActive {
+            return runNested(
+                argv: resolved, cwd: guestCwd,
+                stdinFD: stdinFD, stdoutFD: stdoutFD, stderrFD: stderrFD,
+                interactive: interactive
+            )
+        }
+        return runSync(
+            argv: resolved, cwd: guestCwd,
+            stdinFD: stdinFD, stdoutFD: stdoutFD, stderrFD: stderrFD,
+            interactive: interactive
+        )
+    }
+
+    private func guestCwd(from cwd: String) -> String {
+        if GuestWorkPath.isGuest(cwd) { return cwd }
+        if let work = pathMapper.workHostRoot {
+            return GuestWorkPath.guestPath(cwd, workspace: work.path)
+        }
+        return cwd.hasPrefix("/") ? cwd : GuestWorkPath.guestRoot
+    }
+
+    /// Absolute guest paths (`/bin/sh`) and bare names (`git`) both resolve
+    /// against the rootfs. Relative paths are treated as guest-absolute.
+    func resolveGuestArgv(_ argv: [String]) -> [String]? {
+        guard !argv.isEmpty else { return nil }
+        var resolved = argv
+        if resolved[0].contains("/") {
+            let guest = resolved[0].hasPrefix("/") ? resolved[0] : "/\(resolved[0])"
+            let hostPath = rootfs.appendingPathComponent(String(guest.dropFirst())).path
+            guard LinuxFallback.isGuestExecutable(hostPath, rootfs: rootfs) else { return nil }
+            resolved[0] = guest
+            return resolved
+        }
+        if let guestPath = LinuxFallback.guestCommandPath(name: resolved[0], rootfs: rootfs) {
             resolved[0] = guestPath
-            return runSync(argv: resolved, cwd: request.cwd, stdinFD: request.stdinFD, stdoutFD: request.stdoutFD, stderrFD: request.stderrFD, interactive: request.interactive)
+            return resolved
         }
-
-        write("\(argv[0]): command not found\n")
-        return 127
+        return nil
     }
 
     public func mapHostPath(_ path: String) throws -> String {

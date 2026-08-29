@@ -12,6 +12,11 @@ int termx_blink_run(const char *prog, char *const argv[], char *const envp[],
   (void)prog; (void)argv; (void)envp; (void)stdin_fd; (void)stdout_fd; (void)stderr_fd;
   return -1;
 }
+int termx_blink_run_nested(const char *prog, char *const argv[], char *const envp[],
+                           int stdin_fd, int stdout_fd, int stderr_fd) {
+  (void)prog; (void)argv; (void)envp; (void)stdin_fd; (void)stdout_fd; (void)stderr_fd;
+  return -1;
+}
 void termx_blink_interrupt(void) {}
 void termx_blink_terminate(void) {}
 int termx_blink_is_busy(void) { return 0; }

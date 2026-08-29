@@ -17,7 +17,7 @@ require('./bun-shim.js')
   const tetherLoad = Module._load
   const rawLoad = tetherLoad._tetherOriginalLoad
   if (typeof rawLoad !== 'function') return
-  for (const name of ['child_process', 'os', 'tty']) {
+  for (const name of ['child_process', 'os', 'tty', 'http', 'https', 'dns', 'net']) {
     try {
       const nativeModule = rawLoad(name, module, false)
       const tetherModule = tetherLoad(name, module, false)
@@ -34,6 +34,9 @@ require('./bun-shim.js')
 process.env.DISPLAY = process.env.DISPLAY || ':0'
 process.env.WAYLAND_DISPLAY = process.env.WAYLAND_DISPLAY || 'tether'
 process.env.BROWSER = process.env.BROWSER || 'open'
+// Claude's Vertex/AWS graphs probe EC2/GCE metadata at import time. There is
+// no instance metadata on iOS; without this the ESM import never settles.
+process.env.AWS_EC2_METADATA_DISABLED = process.env.AWS_EC2_METADATA_DISABLED || 'true'
 
 // NodeMobile / jitless V8 ships a broken Intl.Segmenter (null deref in
 // JSSegments::Create). Claude's interactive TUI calls it and SIGSEGVs the app.
@@ -106,26 +109,79 @@ process.env.BROWSER = process.env.BROWSER || 'open'
   }
 })()
 
-// nodejs-mobile is one persistent engine, so this launcher can execute more than
-// once in the same process. Install the loader hook once instead of wrapping an
-// already-wrapped Module._load after every invocation.
+// Bun's standalone graph supports non-JavaScript imports. The extractor writes
+// those embedded files next to the split JS graph, but Node's CommonJS loader
+// otherwise tries to compile (for example) a Markdown prompt as JavaScript.
+// Mirror the Bun loaders used by Claude's graph at this boundary.
+function isPathWithin(candidate, root) {
+  const relative = path.relative(root, candidate)
+  return relative === '' || (
+    relative !== '..' &&
+    !relative.startsWith('..' + path.sep) &&
+    !path.isAbsolute(relative)
+  )
+}
+
+function resolveExtractedRequest(request) {
+  if (typeof request !== 'string') return null
+  const extractedRoot = process.env.CLAUDE_BUNFS_ROOT
+  if (!extractedRoot) return null
+
+  const virtualRequest = request.startsWith('/$bunfs/')
+    ? request.slice(1)
+    : request
+  if (virtualRequest === '$bunfs/root') return extractedRoot
+  if (virtualRequest.startsWith('$bunfs/root/')) {
+    const resolved = path.resolve(extractedRoot, virtualRequest.slice('$bunfs/root/'.length))
+    return isPathWithin(resolved, extractedRoot) ? resolved : null
+  }
+
+  if (!path.isAbsolute(request)) return null
+  const runsRoot = path.join(path.dirname(extractedRoot), '.runs')
+  if (isPathWithin(request, extractedRoot) || isPathWithin(request, runsRoot)) {
+    return request
+  }
+  return null
+}
+
+const noExtractedAsset = Symbol('tether.no-extracted-asset')
+function loadExtractedAsset(request) {
+  const extension = path.extname(request).toLowerCase()
+  if (extension === '.md' || extension === '.txt') {
+    return fs.readFileSync(request, 'utf8')
+  }
+  if (extension === '.asset') return request
+  // Native Bun add-ons cannot be loaded by nodejs-mobile. Preserve the
+  // compatibility fallback used before extracted text assets were supported.
+  if (extension === '.node') return {}
+  return noExtractedAsset
+}
+
+// nodejs-mobile is one persistent engine, so this launcher can execute more
+// than once in the same process. The job runtime restores Module._load after a
+// command finishes; keep the function itself as the marker so a later launcher
+// can tell whether the hook is still active and reinstall it when necessary.
 const bunfsInterceptorKey = Symbol.for('tether.claude.bunfs-interceptor')
-if (!Module[bunfsInterceptorKey]) {
+if (typeof Module[bunfsInterceptorKey] !== 'function' ||
+    Module._load !== Module[bunfsInterceptorKey]) {
   const originalLoad = Module._load
-  Module._load = function bunfsInterceptor(request, parent, isMain) {
-    const extractedRoot = process.env.CLAUDE_BUNFS_ROOT
-    const extractedBundle = extractedRoot && path.dirname(extractedRoot)
-    const isExtractedNative = extractedBundle && path.extname(request) === '.node' &&
-      (request === extractedBundle || request.startsWith(extractedBundle + path.sep))
-    if (request.startsWith('/$bunfs/') || request.startsWith('$bunfs/') || isExtractedNative) {
-      if (path.extname(request) === '.node') {
-        return {}
+  function bunfsInterceptor(request, parent, isMain) {
+    const extractedRequest = resolveExtractedRequest(request)
+    if (extractedRequest) {
+      const asset = loadExtractedAsset(extractedRequest)
+      if (asset !== noExtractedAsset) return asset
+      if (request.startsWith('/$bunfs/') || request.startsWith('$bunfs/')) {
+        return originalLoad.call(this, extractedRequest, parent, isMain)
       }
+    } else if (typeof request === 'string' &&
+               (request.startsWith('/$bunfs/') || request.startsWith('$bunfs/'))) {
       return { exports: {} }
     }
     return originalLoad.apply(this, arguments)
   }
-  Module[bunfsInterceptorKey] = true
+  bunfsInterceptor._tetherOriginalLoad = originalLoad
+  Module._load = bunfsInterceptor
+  Module[bunfsInterceptorKey] = bunfsInterceptor
 }
 
 const claudeCodePath = process.env.CLAUDE_CODE_JS ||
@@ -204,6 +260,22 @@ if (process.env.CLAUDE_CODE_ESM === '1') {
             text = `import { createRequire as __tetherCreateRequire_7f3a9c } from "node:module";\n` +
               `const ${binding} = __tetherCreateRequire_7f3a9c(import.meta.url);\n` +
               text.split('import.meta.require').join(binding)
+          }
+          // Vertex upgrade statically imports ~150 AWS/GCP modules. Evaluating
+          // that graph never settles on nodejs-mobile and `showSetupScreens`
+          // awaits it before the first real Ink frame. iOS cannot use Vertex.
+          if (
+            text.includes('findVertexUpgradeCandidates') &&
+            text.includes('tengu_vertex_upgrade_check')
+          ) {
+            text = [
+              '// tether: Vertex upgrade graph omitted (no GCP on device)',
+              'export async function findVertexUpgradeCandidates() { return [] }',
+              'export async function checkVertexDefaultAvailability() { return [] }',
+              'export async function probeVertexModel() { return false }',
+              'export function seedEnvDefaultForUserPin() {}',
+              '',
+            ].join('\n')
           }
           if (text !== original) fs.writeFileSync(file, text)
         }

@@ -36,6 +36,9 @@ require('tether-shim-v2').install(options) → Promise<{ client, handshake }>
    - intercept `Module._load` so `require('tty')`, `require('node:tty')`,
      `require('child_process')`, `require('node:child_process')` return the
      shim modules;
+   - expose the native loader as `_tetherOriginalLoad`, allowing an embedder
+     to synchronize the same implementations into Node's ESM built-in export
+     cells without recursing through the CommonJS interception layer;
    - patch `process.stdout/stderr/stdin` TTY properties.
 4. `install()` is **idempotent**: a second call returns the first promise;
    no second connection, no second `hello` (edge case 13 has a test).
@@ -157,6 +160,10 @@ round trip. The bridge:
   **swallowed**: by reply time the process is already gone, which Node
   callers observe as a no-op; other error codes surface asynchronously as
   `'error'` on the child.
+- `ref()` and `unref()` are chainable compatibility no-ops. TJIP children
+  share the already-unref'd session transport rather than owning individual
+  libuv process handles; exposing the standard methods is required by detached
+  desktop opener libraries.
 - `spawn.resize` → EINVAL unless the child was started `pty:true`.
   `pty:true` is sent only when `opts.stdio === 'inherit'` **and**
   `isatty(0)` per the handshake.

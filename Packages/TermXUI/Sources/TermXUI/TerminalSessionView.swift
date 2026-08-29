@@ -135,10 +135,16 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
             let pump = TerminalOutputPump(
                 terminalView: view,
                 isDark: isDark,
-                sendReply: { [weak self] data in self?.session.send(data) }
+                sendReply: { [weak self] data in
+                    guard let self else { return }
+                    _ = self.session.deliverEmulatorReply(data)
+                }
             )
             pump.start()
             outputPump = pump
+            session.flushOutputToRenderer = { [weak pump] in
+                pump?.flush()
+            }
             session.attachOutputHandler { [weak pump] data in
                 pump?.enqueue(data)
             }
@@ -167,12 +173,21 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
 
         func detach() {
             session.terminalRestoreProvider = nil
+            session.flushOutputToRenderer = nil
             outputPump?.stop()
             outputPump = nil
         }
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
-            session.send(Data(data))
+            let payload = Data(data)
+            if session.suppressQueryReplies {
+                return
+            }
+            if payload.first == 0x1B {
+                _ = session.deliverEmulatorReply(payload)
+                return
+            }
+            session.send(payload)
         }
 
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
@@ -265,4 +280,5 @@ public struct KeyboardAccessoryView: View {
         switch key { case .left: return "←"; case .up: return "↑"; case .down: return "↓"; case .right: return "→"; default: return key.rawValue }
     }
 }
+
 #endif

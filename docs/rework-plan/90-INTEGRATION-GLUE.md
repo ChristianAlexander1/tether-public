@@ -28,7 +28,7 @@ For each returned folder (`TetherVTEngine/`, `TetherJobIPC/`,
 Remove developer debug residue that will otherwise contaminate testing:
 
 - `Packages/TermXUI/Sources/TermXUI/TerminalOutputPump.swift` — agent debug
-  logging with hardcoded `/Users/dev/...` paths.
+  logging with hardcoded absolute host paths.
 - `Packages/TermXNode/Sources/TermXNode/Resources/shim/bootstrap.js` —
   leftover debug ingest fetches and absolute host paths.
 - `Packages/TermXNode/Sources/TermXNode/NodeStdioBridge.swift` — same class
@@ -115,9 +115,9 @@ clean shell.
    and update the synchronized copy in `External/tether-shim/`. Update
    `bootstrap.js` to stop passing `TETHER_INTERACTIVE` and to hand the
    socket path through as before.
-5. Feature-flag the cutover: `TETHER_IPC_V2=1` selects the new server +
-   shim; default stays v1 until the verification matrix passes, then flip
-   the default and delete v1 in a follow-up commit.
+5. TJIP/2 is the only lane. Live stdin is `tty.stdin`; cooked-mode Ctrl-C
+   becomes `signalActiveJob("SIGINT")` only when `foregroundIsRaw` is false.
+   v1 (`NodeSocketServer`, `NodeSpawnBridge`, v1 shim) is deleted.
 6. Update `TermXNode` tests: shim API surface tests point at v2 semantics
    (isTTY from handshake, not env). The `NodeSpawnBridge` `which`-faking
    special case is removed in Step 2 as well — `which` resolves through the

@@ -14,6 +14,21 @@ public protocol NodeService: AnyObject {
     func interrupt(forceNodeSignal: Bool)
     /// Terminal geometry changed; forward it to a running job.
     func resize(cols: Int, rows: Int)
+    func pushStdin(_ data: Data)
+    var foregroundIsRaw: Bool { get }
+    func signalActiveJob(_ name: String)
+    /// True while `run` is executing a job (TJIP stdin can accept emulator replies).
+    var hasActiveJob: Bool { get }
+}
+
+/// Cooked-mode Ctrl-C for a host-proxied job. `send()` stays byte passthrough;
+/// this policy is the only place 0x03 becomes SIGINT, and only when the
+/// foreground PTY is not raw.
+public enum HostJobKeystrokePolicy {
+    public static func signalName(for data: Data, foregroundIsRaw: Bool) -> String? {
+        guard data.contains(0x03), !foregroundIsRaw else { return nil }
+        return "SIGINT"
+    }
 }
 
 // MARK: - Spawn bridge consumed by @tether/shim IPC
@@ -67,6 +82,13 @@ public final class RegistrySpawnExecutor: SpawnExecuting {
     public var laneSignalHandler: ((Int32, Int32) -> Bool)? {
         get { backend.handler }
         set { backend.handler = newValue }
+    }
+
+    /// Injected by the integration so unknown names (`git`, `/bin/sh -c`) run
+    /// as nested guest ELFs instead of returning ENOENT. TermXNode must not
+    /// depend on TermXLinux; the callback is the layering seam.
+    public func registerGuestFallback(_ runner: @escaping FallbackRunner) {
+        engine.registry.registerFallback(runner)
     }
 
     public init(engine: TermXCommandEngine? = nil) {
@@ -254,14 +276,30 @@ public final class EmbeddedNodeService: NodeService, @unchecked Sendable {
     }
 
     /// Forward a terminal resize to the job currently running, if any.
-    /// Without this a Node TUI never learns the window changed — the v1 lane
-    /// had it poll for its own size, which is why rotation did not reflow.
     public func resize(cols: Int, rows: Int) {
         lock.lock()
         let hasJob = currentJob != nil
         lock.unlock()
         guard hasJob else { return }
         runtime.resize(cols: cols, rows: rows)
+    }
+
+    /// Live PTY bytes into the running job's stdin channel.
+    public func pushStdin(_ data: Data) {
+        runtime.pushStdin(data)
+    }
+
+    /// Raw-mode state of the job currently in the foreground, if any.
+    public var foregroundIsRaw: Bool { runtime.foregroundIsRaw }
+
+    public var hasActiveJob: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentJob != nil
+    }
+
+    public func signalActiveJob(_ name: String) {
+        runtime.signalActiveJob(name)
     }
 
     private static func isNpmVersionProbe(_ argv: [String]) -> Bool {
@@ -300,28 +338,16 @@ public enum NodeShim {
     }
 
     public static var preloadPath: String? {
-        bundleDirectory?.appendingPathComponent(useIPCv2 ? "index.v2.js" : "index.js").path
+        bundleDirectory?.appendingPathComponent("index.v2.js").path
     }
 
-    /// Selects the TJIP/2 IPC server and the v2 shim.
-    ///
-    /// v1 answered `isTTY` from `TETHER_INTERACTIVE`, hardcoded colour depth
-    /// to 8, and polled for the window size, so no Node TUI ever received a
-    /// real `SIGWINCH`. v2 derives all of it from the handshake and pushes
-    /// resize events. Opt-in via `TETHER_IPC_V2=1` until the physical-device
-    /// matrix in `docs/rework-plan/90-INTEGRATION-GLUE.md` passes — simulator
-    /// verification alone does not clear that bar.
-    public static var useIPCv2: Bool {
-        let environment = ProcessInfo.processInfo.environment
-        return (environment["TETHER_IPC_V2"] ?? "0") == "1"
-    }
+    /// TJIP/2 is the only IPC lane. v1 answered `isTTY` from `TETHER_INTERACTIVE`,
+    /// hardcoded colour depth, and polled for window size — and structurally
+    /// could not carry a live stdin stream.
+    public static var useIPCv2: Bool { true }
 
     public static var bootstrapPath: String? {
         bundleDirectory?.appendingPathComponent("bootstrap.js").path
-    }
-
-    public static var ensureIpcPath: String? {
-        bundleDirectory?.appendingPathComponent("ensure-ipc.mjs").path
     }
 
     public static let requiredExports = ["spawn", "exec", "execSync", "fork", "spawnSync"]
@@ -339,17 +365,11 @@ public enum NodeEnvironment {
         env["TERM"] = env["TERM"] ?? "xterm-256color"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
         env["PWD"] = cwd
-        if NodeShim.useIPCv2 {
-            // On the v2 lane TTY truth comes from the TJIP/2 handshake, which
-            // reports the fds that are genuinely PTY-bound. Leaving this flag
-            // in the environment would only invite something to consult it.
-            env.removeValue(forKey: "TETHER_INTERACTIVE")
-            env.removeValue(forKey: "TERMX_INTERACTIVE")
-        } else {
-            let interactiveValue = interactive ? "1" : (env["TETHER_INTERACTIVE"] ?? env["TERMX_INTERACTIVE"] ?? "0")
-            env["TETHER_INTERACTIVE"] = interactiveValue
-            env["TERMX_INTERACTIVE"] = interactiveValue
-        }
+        // TTY truth comes from the TJIP/2 handshake, which reports the fds
+        // that are genuinely PTY-bound.
+        env.removeValue(forKey: "TETHER_INTERACTIVE")
+        env.removeValue(forKey: "TERMX_INTERACTIVE")
+        env["TETHER_IPC_V2"] = "1"
         // Quiet defaults for harness/CI; interactive terminal gets live npm output.
         env["npm_config_update_notifier"] = env["npm_config_update_notifier"] ?? "false"
         env["npm_config_fund"] = env["npm_config_fund"] ?? "false"

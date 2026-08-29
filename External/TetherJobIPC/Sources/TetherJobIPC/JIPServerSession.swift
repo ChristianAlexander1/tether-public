@@ -438,6 +438,23 @@ public final class JIPServerSession {
         sendEvent(type: "tty.signal", body: ["signal": name])
     }
 
+    /// Push live stdin bytes to the client. Symmetric with `pushResize`: the
+    /// host drains the PTY and forwards frames; the shim writes them into
+    /// `process.stdin`. Empty payloads are ignored — a terminal never implies
+    /// stdin EOF, including on idle. Chunks are split at 64 KiB raw, matching
+    /// the spawn-domain limit.
+    public func pushStdin(_ data: Data) {
+        guard !closed, isHandshakeComplete else { return }
+        guard !data.isEmpty else { return }
+        var start = 0
+        while start < data.count {
+            let end = min(start + Self.chunkLimit, data.count)
+            let chunk = data.subdata(in: start..<end)
+            start = end
+            sendEvent(type: "tty.stdin", body: ["dataB64": chunk.base64EncodedString()])
+        }
+    }
+
     /// Push a stdout chunk. Split into ≤65,536-byte raw chunks; subject to the
     /// per-pid flow-control window.
     public func pushStdout(pid: Int32, data: Data) {

@@ -148,7 +148,7 @@ public final class ClaudeCodeService {
     public func login(cwd: String, env: [String: String], fds: (Int32, Int32, Int32)) async -> Int32 {
         do {
             return try await run(
-                argv: ["claude", "login"], cwd: cwd, env: env, fds: fds
+                argv: ["claude", "auth", "login"], cwd: cwd, env: env, fds: fds
             )
         } catch {
             emit("claude: \(error)\n", to: fds.2 >= 0 ? fds.2 : fds.1)
@@ -183,10 +183,14 @@ public final class ClaudeCodeService {
             argv: argv.isEmpty ? ["claude"] : argv,
             cwd: cwd, env: env, fds: fds
         )
-        if code == 0, argv.dropFirst().first == "login" {
+        if code == 0, Self.isAuthenticationLogin(argv) {
             defaults.set(true, forKey: authKey)
         }
         return code
+    }
+
+    private static func isAuthenticationLogin(_ argv: [String]) -> Bool {
+        Array(argv.dropFirst().prefix(2)) == ["auth", "login"]
     }
 
     /// Run any `claude …` argv on the detected lane (no reinstall).

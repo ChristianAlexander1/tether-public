@@ -40,6 +40,18 @@ test('cp: spawn returns a ChildProcess synchronously; pid arrives with the reply
   child.stderr.resume();
 });
 
+test('cp: ref and unref are chainable for detached desktop opener libraries', async () => {
+  const child = cp.spawn('xdg-open', ['https://example.com'], {
+    stdio: 'ignore',
+    detached: true,
+  });
+
+  assert.equal(child.unref(), child);
+  assert.equal(child.ref(), child);
+  assert.equal(child.unref(), child);
+  await until(() => child.pid !== undefined, { message: 'pid set' });
+});
+
 test('cp: spawn.start body carries argv/cwd/env/stdio per spec', async () => {
   const { server } = await session;
   const child = cp.spawn('grep', ['-r', 'x', '.'], { cwd: '/work', env: { A: 'b' } });

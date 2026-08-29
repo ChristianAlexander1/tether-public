@@ -56,26 +56,10 @@ function bindStdinFromJob(job) {
     const stream = new PassThrough();
     stream.end(buf);
     stdinOverride = stream;
-  } else {
-    const fd = Number(job.stdinFD ?? -1);
-    if (fd >= 0) {
-      // Legacy path: fd still attached (host / tests). Prefer Swift slurp in production.
-      const fs = require('fs');
-      const stream = new PassThrough();
-      const chunk = Buffer.alloc(64 * 1024);
-      try {
-        for (;;) {
-          const n = fs.readSync(fd, chunk, 0, chunk.length, null);
-          if (!n) break;
-          stream.write(chunk.subarray(0, n));
-        }
-      } catch (_) {
-        /* ignore */
-      }
-      stream.end();
-      stdinOverride = stream;
-    }
   }
+  // Interactive TTY stdin is a live Readable installed by the v2 shim from
+  // tty.stdin pushes. Never pass the PTY slave fd to nodejs-mobile (it fails
+  // to poll borrowed fds after npm) and never end that stream on idle.
 
   if (!stdinOverride) return;
 
@@ -176,10 +160,166 @@ function teardownJob(keepRef) {
   }
 }
 
+/**
+ * Cloud SDK graphs (Vertex/AWS IMDS) probe link-local metadata at import time.
+ * nodejs-mobile does not time those sockets or getaddrinfo out, which
+ * deadlocks ESM `import()` while the event loop still runs timers.
+ */
+function rejectInstanceMetadata() {
+  if (rejectInstanceMetadata._installed) return;
+  rejectInstanceMetadata._installed = true;
+  function isMetadataHost(host) {
+    let h = String(host || '').trim().toLowerCase();
+    h = h.replace(/^\[(.+)\]$/, '$1');
+    const colons = (h.match(/:/g) || []).length;
+    if (colons === 1 && !h.includes('::')) h = h.split(':')[0];
+    return h === '169.254.169.254' || h === '169.254.170.2'
+      || h === 'fd00:ec2::254' || h === 'metadata.google.internal';
+  }
+  function hostOf(options) {
+    if (typeof options === 'string') {
+      try { return require('url').parse(options).hostname || ''; } catch (_) { return ''; }
+    }
+    if (!options || typeof options !== 'object') return '';
+    return options.hostname || options.host || '';
+  }
+  function metaErr(host) {
+    return Object.assign(new Error('tether: instance metadata is not available'), {
+      code: 'ENOTFOUND',
+      errno: 'ENOTFOUND',
+      syscall: 'getaddrinfo',
+      hostname: host,
+    });
+  }
+  function rejectReq(host) {
+    const { EventEmitter } = require('events');
+    const req = new EventEmitter();
+    req.aborted = false;
+    req.destroyed = false;
+    req.destroy = function destroy(err) {
+      this.destroyed = true;
+      this.emit('error', err || new Error('destroyed'));
+      return this;
+    };
+    req.abort = function abort() { this.aborted = true; this.destroy(); return this; };
+    req.end = function end() { return this; };
+    req.write = function write() { return true; };
+    req.setTimeout = function setTimeoutMs() { return this; };
+    req.setHeader = function setHeader() {};
+    req.getHeader = function getHeader() { return undefined; };
+    req.removeHeader = function removeHeader() {};
+    req.flushHeaders = function flushHeaders() {};
+    process.nextTick(() => req.emit('error', metaErr(host)));
+    return req;
+  }
+  function patchHttp(mod) {
+    if (!mod || typeof mod.request !== 'function' || mod.request.__tetherMeta) return;
+    const origReq = mod.request;
+    const origGet = typeof mod.get === 'function' ? mod.get : null;
+    function wrappedRequest(options, cb) {
+      const host = hostOf(options);
+      if (isMetadataHost(host)) return rejectReq(host);
+      return origReq.apply(this, arguments);
+    }
+    wrappedRequest.__tetherMeta = true;
+    mod.request = wrappedRequest;
+    if (origGet) {
+      mod.get = function wrappedGet(options, cb) {
+        const req = wrappedRequest.apply(this, arguments);
+        if (req && typeof req.end === 'function') req.end();
+        return req;
+      };
+    }
+  }
+  function patchDns(dns) {
+    if (!dns || typeof dns.lookup !== 'function' || dns.lookup.__tetherMeta) return;
+    const origLookup = dns.lookup;
+    function wrappedLookup(hostname, options, callback) {
+      const host = String(hostname || '');
+      const cb = typeof options === 'function' ? options : callback;
+      if (isMetadataHost(host)) {
+        if (typeof cb === 'function') process.nextTick(() => cb(metaErr(host)));
+        return;
+      }
+      return origLookup.apply(this, arguments);
+    }
+    wrappedLookup.__tetherMeta = true;
+    dns.lookup = wrappedLookup;
+    if (dns.promises && typeof dns.promises.lookup === 'function' && !dns.promises.lookup.__tetherMeta) {
+      const origProm = dns.promises.lookup.bind(dns.promises);
+      dns.promises.lookup = function wrappedPromLookup(hostname, options) {
+        const host = String(hostname || '');
+        if (isMetadataHost(host)) {
+          return Promise.reject(metaErr(host));
+        }
+        return origProm(hostname, options);
+      };
+      dns.promises.lookup.__tetherMeta = true;
+    }
+  }
+  function netHost(args) {
+    const a = args[0];
+    if (a && typeof a === 'object') return a.host || a.hostname || '';
+    if (typeof a === 'number') return typeof args[1] === 'string' ? args[1] : '';
+    return '';
+  }
+  function patchNet(net) {
+    if (!net || typeof net.connect !== 'function' || net.connect.__tetherMeta) return;
+    const origConnect = net.connect;
+    const origCreate = net.createConnection;
+    function wrappedConnect() {
+      const host = netHost(arguments);
+      if (isMetadataHost(host)) {
+        const { Socket } = net;
+        const sock = new Socket();
+        process.nextTick(() => sock.destroy(metaErr(host)));
+        return sock;
+      }
+      return origConnect.apply(this, arguments);
+    }
+    wrappedConnect.__tetherMeta = true;
+    net.connect = wrappedConnect;
+    if (typeof origCreate === 'function') net.createConnection = wrappedConnect;
+  }
+  const http = require('http');
+  const https = require('https');
+  const dns = require('dns');
+  const net = require('net');
+  patchHttp(http);
+  patchHttp(https);
+  patchDns(dns);
+  patchNet(net);
+  try {
+    const Module = require('module');
+    const raw = Module._load && Module._load._tetherOriginalLoad;
+    if (typeof raw === 'function') {
+      patchHttp(raw('http', module, false));
+      patchHttp(raw('https', module, false));
+      patchDns(raw('dns', module, false));
+      patchNet(raw('net', module, false));
+    }
+    if (typeof Module.syncBuiltinESMExports === 'function') Module.syncBuiltinESMExports();
+  } catch (_) { /* launcher also republishes these cells */ }
+  // undici keeps its own connect path, so reject metadata hosts at the fetch layer too.
+  const origFetch = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null;
+  if (origFetch && !globalThis.fetch.__tetherMeta) {
+    function wrappedFetch(input, init) {
+      const raw = typeof input === 'string' ? input : (input && (input.url || input.href)) || '';
+      let host = '';
+      try { host = new URL(String(raw)).hostname; } catch (_) { /* relative or opaque */ }
+      if (host && isMetadataHost(host)) return Promise.reject(metaErr(host));
+      return origFetch.apply(this, arguments);
+    }
+    wrappedFetch.__tetherMeta = true;
+    globalThis.fetch = wrappedFetch;
+  }
+}
+
 /** Push each stdout/stderr write to the PTY immediately (embedded Node buffers otherwise). */
 function enableLiveOutput() {
   if (enableLiveOutput._installed) return;
   enableLiveOutput._installed = true;
+  rejectInstanceMetadata();
   const fs = require('fs');
   function wrap(stream, fd) {
     const orig = stream.write.bind(stream);
@@ -225,8 +365,10 @@ function finishJob(keepRef, ipc) {
   teardownJob(keepRef);
   restoreStdin();
   restoreProcessListeners();
-  try { ipc.clearTransport(); } catch (_) { /* ignore */ }
+  try { if (ipc && typeof ipc.clearTransport === 'function') ipc.clearTransport(); } catch (_) { /* ignore */ }
 }
+
+try { rejectInstanceMetadata(); } catch (_) { /* best-effort; enableLiveOutput retries */ }
 
 module.exports = {
   beginJob,
@@ -237,4 +379,5 @@ module.exports = {
   silenceEventLoopStorm,
   finishJob,
   enableLiveOutput,
+  rejectInstanceMetadata,
 };

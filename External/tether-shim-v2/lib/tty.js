@@ -6,6 +6,7 @@
 // in stock Node.
 
 const { Readable, Writable } = require('node:stream');
+const fs = require('node:fs');
 
 let ctx = null; // set by install() after the handshake completes
 
@@ -138,6 +139,27 @@ class ReadStream extends Readable {
     return applyRawMode(this, this.fd, mode);
   }
 
+  /**
+   * Node's tty.ReadStream extends net.Socket, so it carries the libuv
+   * ref()/unref()/destroySoon() surface. This stream is fed by pushed
+   * `tty.stdin` frames and owns no libuv handle, so there is nothing to
+   * ref — but the methods must exist and be chainable. Ink calls
+   * `stdin.ref()` first in its raw-mode entry sequence, ahead of
+   * setRawMode() and the 'readable' listener; a missing method throws
+   * there and silently costs the program both its input and its output.
+   */
+  ref() {
+    return this;
+  }
+
+  unref() {
+    return this;
+  }
+
+  destroySoon() {
+    return this.destroy();
+  }
+
   _read() {
     // Input bytes for fd 0 are fed by the host through the real descriptor;
     // this class carries TTY identity and raw-mode control over the wire.
@@ -169,7 +191,39 @@ class WriteStream extends Writable {
     return 2 ** this.getColorDepth(env) >= count;
   }
 
+  /** Symmetric with ReadStream: no libuv handle to ref, but chainable. */
+  ref() {
+    return this;
+  }
+
+  unref() {
+    return this;
+  }
+
+  /**
+   * Node's tty.WriteStream writes to its fd. Discarding the chunk here
+   * turns any `new tty.WriteStream(1)` into a silent black hole, which is
+   * indistinguishable from a hung program. fd 1/2 are the host's real
+   * descriptors, so write them directly, looping over partial writes and
+   * retrying the non-blocking EAGAIN a PTY can return.
+   */
   _write(chunk, encoding, callback) {
+    const buf = Buffer.isBuffer(chunk)
+      ? chunk
+      : Buffer.from(String(chunk), encoding === 'buffer' ? 'utf8' : encoding || 'utf8');
+    let offset = 0;
+    while (offset < buf.length) {
+      let written;
+      try {
+        written = fs.writeSync(this.fd, buf, offset, buf.length - offset);
+      } catch (err) {
+        if (err.code === 'EAGAIN') continue;
+        if (err.code === 'EPIPE') return callback();
+        return callback(err);
+      }
+      if (!(written > 0)) break;
+      offset += written;
+    }
     callback();
   }
 }

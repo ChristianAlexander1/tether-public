@@ -13,6 +13,9 @@ Record device model, iOS version, app version/build, commit, tester and date.
 - Run Node with redirected output and confirm the file contains only requested bytes.
 - Open a generic HTTPS URL from Alpine and from Node.
 - Complete real Claude account login, exit with double Ctrl-C, and start it again.
+  Live stdin over TJIP/2 is now the product lane, so this is testable: cooked-mode
+  Ctrl-C becomes `signalActiveJob("SIGINT")` only when `foregroundIsRaw` is false;
+  a raw-mode TUI receives the `0x03` byte and counts its own presses.
 - Create/edit a workspace file from the CLI and inspect it in Files.
 - Change terminal font size, rotate the device, use hardware/software keyboards,
   paste at least 10 KB and exercise VoiceOver labels on app chrome.

@@ -504,6 +504,20 @@ class ChildProcess extends EventEmitter {
   }
 
   /**
+   * TJIP children share the session transport rather than owning an individual
+   * libuv process handle. The transport is already unref'd by the session shim,
+   * so these standard Node methods are intentionally chainable no-ops. Desktop
+   * opener packages call unref() after a detached spawn and must not crash.
+   */
+  ref() {
+    return this;
+  }
+
+  unref() {
+    return this;
+  }
+
+  /**
    * spawn.resize → promise of the response body. Rejects/resolves with
    * { ok:false, code:'EINVAL' } unless the child was started with pty:true.
    */

@@ -131,6 +131,19 @@ node -e 'console.log(6 * 7)'
 These are real Alpine packages and guest commands. Only manifest-declared
 platform runtimes and desktop opener capabilities cross into app services.
 
+Install or refresh Claude from Storage, then authenticate from the terminal
+with the current CLI contract:
+
+```sh
+claude --version
+claude auth status
+claude auth login
+```
+
+Login presents the authorization URL through Tether's in-app browser bridge.
+`claude login` is not an authentication subcommand; current Claude releases
+interpret it as prompt text.
+
 Run an arbitrary WASI module from the selected workspace with:
 
 ```sh
@@ -147,12 +160,10 @@ wasm module.wasm arg1 arg2
 - `TETHER_PTY_LOG=1` mirrors debug PTY bytes to the app-owned
   `Documents/.tether-pty.log`
 - `TETHER_HOST_SHELL=1` selects the host shell; Alpine is the product default
-- `TETHER_IPC_V2=1` selects the TJIP/2 lane for host-run Node jobs: per-fd
-  `isTTY` from the protocol handshake, real PTY geometry pushed on resize
-  (a genuine `SIGWINCH` inside Node), true colour depth, and working
-  `spawn.kill`. Still opt-in while the device matrix in
-  `docs/rework-plan/90-INTEGRATION-GLUE.md` is outstanding; the legacy lane is
-  the default until then.
+
+TJIP/2 is the only Node IPC lane: per-fd `isTTY` from the protocol handshake,
+real PTY geometry pushed on resize, true colour depth, live stdin over
+`tty.stdin`, and `spawn.kill`. The v1 newline-JSON lane is gone.
 
 Legacy `TERMX_` aliases remain readable for existing automation, but new usage
 should use `TETHER_`.
@@ -161,7 +172,7 @@ should use `TETHER_`.
 
 ```bash
 SIMCTL_CHILD_TETHER_UI_TEST_MODE=1 SIMCTL_CHILD_TETHER_AUTOWORKSPACE=1 \
-SIMCTL_CHILD_TETHER_PTY_LOG=1 SIMCTL_CHILD_TETHER_IPC_V2=1 \
+SIMCTL_CHILD_TETHER_PTY_LOG=1 \
 SIMCTL_CHILD_TETHER_AUTOCOMMANDS='node -e "console.log(process.stdout.columns, process.stdout.getColorDepth())"' \
 xcrun simctl launch 'iPhone 17 Pro' com.tether.app
 ```

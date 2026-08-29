@@ -27,17 +27,18 @@ final class NodeTests: XCTestCase {
             XCTFail("shim bundle missing")
             return URL(fileURLWithPath: "/")
         }()
-        let index = try String(contentsOf: shimRoot.appendingPathComponent("index.js"))
+        let index = try String(contentsOf: shimRoot.appendingPathComponent("index.v2.js"))
         XCTAssertTrue(index.contains("Module._load"), "shim must patch Module._load")
-        let child = try String(contentsOf: shimRoot.appendingPathComponent("lib/child_process.js"))
+        let child = try String(contentsOf: shimRoot.appendingPathComponent("v2/lib/child_process.js"))
         for api in NodeShim.requiredExports {
             XCTAssertTrue(child.contains(api), "shim must export \(api)")
         }
         XCTAssertTrue(child.contains("spawnSync"))
         XCTAssertTrue(child.contains("execSync"))
         XCTAssertTrue(child.contains("fork"))
-        let ipc = try String(contentsOf: shimRoot.appendingPathComponent("lib/ipc.js"))
-        XCTAssertTrue(ipc.contains("roundTrip"))
+        let ipc = try String(contentsOf: shimRoot.appendingPathComponent("v2/lib/index.js"))
+        XCTAssertTrue(ipc.contains("beginSession"),
+                      "v2 shim must open a TJIP/2 session")
 
         let bootstrap = try String(contentsOf: shimRoot.appendingPathComponent("bootstrap.js"))
         XCTAssertFalse(bootstrap.contains("require('module').runMain()"),
@@ -60,6 +61,10 @@ final class NodeTests: XCTestCase {
                       "persistent jobs must release handles before the next command")
         XCTAssertTrue(bootstrap.contains("process.emit('exit', status)"),
                       "persistent jobs must run normal Node exit handlers")
+        XCTAssertFalse(
+            bootstrap.contains("trace("),
+            "bootstrap must not call a removed debug logger during job completion"
+        )
     }
 
     func testRegistryJSONLoads() throws {
@@ -78,6 +83,7 @@ final class NodeTests: XCTestCase {
             throw XCTSkip("node binary not available")
         }
         let outPipe = Pipe()
+        let errPipe = Pipe()
         let service = EmbeddedNodeService()
         let code = await service.run(
             argv: ["node", "-e", "console.log(1+1)"],
@@ -85,12 +91,14 @@ final class NodeTests: XCTestCase {
             env: [:],
             stdinFD: -1,
             stdoutFD: outPipe.fileHandleForWriting.fileDescriptor,
-            stderrFD: -1,
+            stderrFD: errPipe.fileHandleForWriting.fileDescriptor,
             interactive: false
         )
         outPipe.fileHandleForWriting.closeFile()
+        errPipe.fileHandleForWriting.closeFile()
         let output = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        XCTAssertEqual(code, 0, "stderr/out: \(output)")
+        let errors = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertEqual(code, 0, "stderr: \(errors); stdout: \(output)")
         XCTAssertTrue(output.contains("2"), "expected '2' in output, got: \(output)")
     }
 
@@ -166,31 +174,42 @@ final class NodeTests: XCTestCase {
         XCTAssertEqual(out.trimmingCharacters(in: .whitespacesAndNewlines), "darwin")
     }
 
-    func testTtyIsattyWhenInteractive() throws {
+    func testTtyIsattyIsNotFakedFromTheInteractiveEnvironmentFlag() throws {
         guard let node = HostNodeRuntime.resolveNodeBinaryForTests(),
-              NodeShim.preloadPath != nil else {
+              let preload = NodeShim.preloadPath else {
             throw XCTSkip("node/shim unavailable")
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: node)
         process.arguments = ["-e", "console.log(require('tty').isatty(1)?'yes':'no')"]
-        var nodeOptionsParts: [String] = []
-        if let ensureIpc = NodeShim.ensureIpcPath {
-            nodeOptionsParts.append("--import \(ensureIpc)")
-        }
-        if let preload = NodeShim.preloadPath {
-            nodeOptionsParts.append("--require \(preload)")
-        }
         process.environment = [
-            "NODE_OPTIONS": nodeOptionsParts.joined(separator: " "),
+            "NODE_OPTIONS": "--require \(preload)",
             "TETHER_INTERACTIVE": "1",
+            "TETHER_IPC_V2": "1",
         ]
         let pipe = Pipe()
         process.standardOutput = pipe
         try process.run()
         process.waitUntilExit()
         let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        XCTAssertEqual(out.trimmingCharacters(in: .whitespacesAndNewlines), "yes")
+        XCTAssertEqual(
+            out.trimmingCharacters(in: .whitespacesAndNewlines),
+            "no",
+            "piped stdout must not become a TTY because TETHER_INTERACTIVE is set"
+        )
+    }
+
+    func testCookedCtrlCBecomesSIGINTAndRawModeDoesNot() {
+        XCTAssertEqual(
+            HostJobKeystrokePolicy.signalName(for: Data([0x03]), foregroundIsRaw: false),
+            "SIGINT"
+        )
+        XCTAssertNil(HostJobKeystrokePolicy.signalName(for: Data([0x03]), foregroundIsRaw: true))
+        XCTAssertNil(HostJobKeystrokePolicy.signalName(for: Data("a".utf8), foregroundIsRaw: false))
+        XCTAssertEqual(
+            HostJobKeystrokePolicy.signalName(for: Data([0x61, 0x03]), foregroundIsRaw: false),
+            "SIGINT"
+        )
     }
 }
 

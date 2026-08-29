@@ -18,10 +18,15 @@ final class WorkspaceSessionServices: SessionServices {
     private let scrollback: ScrollbackStore
     private let releaseScope: () -> Void
     private let presentFailure: (SessionFailure) -> Void
-    private let startShellHandler: (@escaping (Result<Void, Error>) -> Void) -> Void
+    private let makeShell: () -> TerminalSession
+    private let didStartShell: (TerminalSession) -> Void
 
-    /// The live session, set once the shell starts and cleared on teardown.
-    weak var session: TerminalSession?
+    /// The live session. Lifecycle services retain the resource they own until
+    /// teardown is complete; relying only on SwiftUI state made startup
+    /// cancellation capable of deallocating the session mid-bootstrap.
+    private(set) var session: TerminalSession?
+    /// Routes the engine callback back into the session state machine.
+    var shellExited: ((Int32) -> Void)?
     /// Supplies the terminal's current mode state for a snapshot.
     var modeStateProvider: (() -> Data)?
 
@@ -32,19 +37,22 @@ final class WorkspaceSessionServices: SessionServices {
     /// workspaces each hold their own, and Storage can name who is blocking.
     private lazy var leaseOwner = "terminal-session-\(workspaceID)"
     private var holdsRootfsLease = false
+    private var bootstrapTask: Task<Void, Never>?
 
     init(
         workspaceID: String,
         integration: TermXIntegration,
         scrollback: ScrollbackStore,
-        startShell: @escaping (@escaping (Result<Void, Error>) -> Void) -> Void,
+        makeShell: @escaping () -> TerminalSession,
+        didStartShell: @escaping (TerminalSession) -> Void,
         releaseScope: @escaping () -> Void,
         presentFailure: @escaping (SessionFailure) -> Void
     ) {
         self.workspaceID = workspaceID
         self.integration = integration
         self.scrollback = scrollback
-        self.startShellHandler = startShell
+        self.makeShell = makeShell
+        self.didStartShell = didStartShell
         self.releaseScope = releaseScope
         self.presentFailure = presentFailure
         self.pendingRestore = scrollback.take(for: workspaceID)
@@ -53,28 +61,50 @@ final class WorkspaceSessionServices: SessionServices {
     // MARK: - SessionServices
 
     func startBootstrap(completion: @escaping (Result<Void, Error>) -> Void) {
+        acquireRootfsLeaseIfNeeded()
         let linux = integration.linux
-        Task {
+        bootstrapTask?.cancel()
+        bootstrapTask = Task {
+            defer { bootstrapTask = nil }
             do {
-                try await linux.bootstrap()
-                await MainActor.run { completion(.success(())) }
+                linux.invalidateIfRootfsMissing()
+                if linux.state != .ready {
+                    try await linux.bootstrap()
+                }
+                guard !Task.isCancelled else { return }
+                completion(.success(()))
             } catch {
-                await MainActor.run { completion(.failure(error)) }
+                guard !Task.isCancelled else { return }
+                completion(.failure(error))
             }
         }
     }
 
     func startShell(completion: @escaping (Result<Void, Error>) -> Void) {
-        // Take the lease before the shell exists: Storage must never be able to
-        // delete the rootfs a session is about to execute out of.
-        if !holdsRootfsLease {
-            TetherStorage.shared.beginSessionUse(.linuxRootfs, owner: leaseOwner)
-            holdsRootfsLease = true
+        acquireRootfsLeaseIfNeeded()
+        do {
+            let started = makeShell()
+            session = started
+            modeStateProvider = { [weak started] in
+                started?.terminalRestoreProvider?() ?? Data()
+            }
+            started.onShellExited = { [weak self] code in
+                self?.shellExited?(code)
+            }
+            try started.start()
+            didStartShell(started)
+            completion(.success(()))
+        } catch {
+            session = nil
+            completion(.failure(error))
         }
-        startShellHandler(completion)
     }
 
     func emitRestoreSequence() {
+        session?.repairTerminalModes()
+    }
+
+    func restoreSavedScrollback() {
         guard let snapshot = pendingRestore, let session else { return }
         pendingRestore = nil
         var payload = Data("\r\n[restored session view]\r\n".utf8)
@@ -101,10 +131,11 @@ final class WorkspaceSessionServices: SessionServices {
     }
 
     func signalShell(_ name: String) {
-        switch name {
-        case "SIGINT": session?.interrupt()
-        default: session?.terminate()
-        }
+        // Signalling and closing are separate lifecycle commands. Calling
+        // terminate() here used to close the PTY before the state machine's
+        // wait/reader-stop steps, recreating the crash this layer exists to
+        // prevent.
+        session?.signalShell(name)
     }
 
     func waitForEngineExit(graceMillis: Int) {
@@ -116,6 +147,8 @@ final class WorkspaceSessionServices: SessionServices {
     }
 
     func releaseWorkspaceScope() {
+        bootstrapTask?.cancel()
+        bootstrapTask = nil
         // The lease outlives every other teardown step for the same reason the
         // scope does: anything still draining may touch the rootfs.
         if holdsRootfsLease {
@@ -123,6 +156,12 @@ final class WorkspaceSessionServices: SessionServices {
             holdsRootfsLease = false
         }
         releaseScope()
+    }
+
+    private func acquireRootfsLeaseIfNeeded() {
+        guard !holdsRootfsLease else { return }
+        TetherStorage.shared.beginSessionUse(.linuxRootfs, owner: leaseOwner)
+        holdsRootfsLease = true
     }
 
     func showFailure(_ failure: SessionFailure) {

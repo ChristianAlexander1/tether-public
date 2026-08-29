@@ -2,7 +2,7 @@
   "name": "@tether/shim",
   "version": "1.0.0",
   "description": "Node child_process / os / tty replacement that forwards spawns over a host IPC pipe",
-  "main": "index.js",
+  "main": "index.v2.js",
   "license": "MIT",
   "scripts": {
     "test": "node --test test/*.test.js"
@@ -11,8 +11,9 @@
     "node": ">=18"
   },
   "files": [
-    "index.js",
+    "index.v2.js",
     "lib",
+    "v2",
     "LICENSE"
   ]
 }

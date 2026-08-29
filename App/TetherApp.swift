@@ -337,15 +337,31 @@ struct WorkspaceView: View {
         resolvedPath = path
         didTearDown = false
 
+        let newSession = TerminalSession(cwd: path, engine: model.engine)
+        newSession.onResize = { [weak model] cols, rows in
+            model?.integration.resizeActiveRuntimes(cols: cols, rows: rows)
+        }
+        newSession.onKeystroke = { [weak model] data in
+            model?.integration.handleHostJobKeystroke(data)
+        }
+        newSession.onEmulatorReply = { [weak model] data in
+            model?.integration.pushStdinToActiveHostJob(data) ?? false
+        }
+
         // One lifecycle machine per session. It owns bootstrap -> shell ->
         // teardown ordering; this view only supplies the services and events.
         let services = WorkspaceSessionServices(
             workspaceID: workspace.id.uuidString,
             integration: model.integration,
             scrollback: model.scrollback,
-            startShell: { completion in completion(.success(())) },
+            makeShell: { newSession },
+            didStartShell: { started in
+                session = started
+                startDebugAutomation(on: started)
+            },
             releaseScope: { [workspace, model] in model.workspaces.endAccess(workspace) },
             presentFailure: { failure in
+                session = nil
                 lifecycleFailure = failure
                 startFailed = true
                 startError = Self.describe(failure)
@@ -354,52 +370,18 @@ struct WorkspaceView: View {
         let runner = SessionCommandRunner(services: services)
         lifecycleServices = services
         lifecycle = runner
-
-        let newSession = TerminalSession(cwd: path, engine: model.engine)
-        do {
-            try newSession.start()
-        } catch {
-            lifecycle = nil
-            lifecycleServices = nil
-            model.workspaces.endAccess(workspace)
-            resolvedPath = nil
-            startFailed = true
-            startError = error.localizedDescription
-            return
-        }
-        services.session = newSession
-        // A snapshot taken mid-TUI must end with the sequence that returns the
-        // terminal to a sane state, or a restore would replay into a dead
-        // alternate screen.
-        services.modeStateProvider = { [weak newSession] in
-            newSession?.terminalRestoreProvider?() ?? Data()
-        }
-        newSession.onShellExited = { [weak runner] code in
+        services.shellExited = { [weak runner] code in
             runner?.send(.shellExited(code: code))
-        }
-        // The shell is already running by the time the machine is driven, so
-        // walk it to `.active` with the outcomes that actually happened rather
-        // than re-running the work.
-        runner.send(.workspaceOpened)
-        runner.send(.bootstrapSucceeded)
-        runner.send(.shellStarted)
-        guard !Task.isCancelled, model.selected?.id == workspace.id else {
-            newSession.terminate()
-            model.workspaces.endAccess(workspace)
-            resolvedPath = nil
-            return
         }
         // A host-proxied job that dies mid-TUI leaves the terminal wedged;
         // route its completion to the session so the view layer repairs it.
         model.integration.onHostJobFinished = { [weak newSession] code in
             newSession?.hostJobFinished(code: code)
         }
-        // Host-run jobs live outside the guest's controlling terminal, so the
-        // kernel never signals them on resize. Push the size down explicitly.
-        newSession.onResize = { [weak model] cols, rows in
-            model?.integration.resizeActiveRuntimes(cols: cols, rows: rows)
-        }
-        session = newSession
+        runner.send(.workspaceOpened)
+    }
+
+    private func startDebugAutomation(on newSession: TerminalSession) {
         #if DEBUG
         // Simulator harness: TETHER_AUTOCOMMANDS holds newline-separated
         // commands, or TETHER_AUTOCOMMAND_FILE points at a script in the

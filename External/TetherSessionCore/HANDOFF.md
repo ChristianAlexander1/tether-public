@@ -35,7 +35,8 @@ for command in commands { execute(command) }
 |---|---|---|
 | `.startBootstrap` | Begin rootfs bootstrap (ensure workspace scope valid, mount/extract rootfs) | `.bootstrapSucceeded` or `.bootstrapFailed(msg)` |
 | `.startShell` | Spawn the guest engine and attach a PTY reader | `.shellStarted` or `.ptyFailed(msg)` |
-| `.emitRestoreSequence` | Re-render the screen from the most recent `ScrollbackSnapshot` | — (no feedback event) |
+| `.emitRestoreSequence` | Emit any terminal-mode reset still owed by the live TUI | — (no feedback event) |
+| `.restoreSavedScrollback` | Replay the validated saved snapshot after the new PTY is attached | — (no feedback event) |
 | `.snapshotScrollback` | Serialize current scrollback+screen into a snapshot (see §4) | — (no feedback event) |
 | `.stopOutputPump` | Signal the reader thread to stop and join it | — (no feedback event) |
 | `.signalShell("SIGHUP")` | Send the named signal to the guest process | — (no feedback event) |
@@ -61,8 +62,10 @@ descriptor. `releaseWorkspaceScope` is always last, because every other step may
 still be touching the workspace.
 
 `snapshotScrollback` comes **before** `emitRestoreSequence`: the snapshot
-captures the live TUI screen; the restore sequence is what re-renders a clean
-screen from it. Snapshot first, restore second.
+captures the live TUI bytes and the terminal-mode repair they require; the
+restore sequence then repairs the current live renderer. Snapshot first,
+repair second. Replaying a saved snapshot is the distinct
+`restoreSavedScrollback` command emitted only after a new shell starts.
 
 `markNeedsBootstrap` appears **before** `showFailure(.rootfsRemoved)` in the
 rootfs-removal path so that the pending "needs bootstrap" flag is set before the
@@ -149,7 +152,8 @@ func run(_ machine: SessionStateMachine, _ event: SessionEvent) {
         switch command {
         case .startBootstrap:       startBootstrap()                      // → returns bootstrapSucceeded/failed
         case .startShell:           startShell()                          // → returns shellStarted/ptyFailed
-        case .emitRestoreSequence:  emitRestoreFrom(snapshot())           // → nothing
+        case .emitRestoreSequence:  repairLiveTerminalModes()             // → nothing
+        case .restoreSavedScrollback: replaySavedSnapshot()                // → nothing
         case .snapshotScrollback:   saveScrollback(snapshot())            // → nothing
         case .stopOutputPump:       reader.stopAndJoin()                  // → nothing
         case .signalShell(let s):   engine.send(signal: s)               // → nothing
@@ -166,7 +170,7 @@ func run(_ machine: SessionStateMachine, _ event: SessionEvent) {
 let machine = SessionStateMachine()
 run(machine, .workspaceOpened)      // → [.startBootstrap]
 run(machine, .bootstrapSucceeded)   // → [.startShell]
-run(machine, .shellStarted)         // → [] ; phase == .active
+run(machine, .shellStarted)         // → [.restoreSavedScrollback]; active
 // When the user closes:
 run(machine, .userRequestedClose)   // → full, ordered teardown list
 run(machine, .teardownFinished)     // → [] ; phase == .closed

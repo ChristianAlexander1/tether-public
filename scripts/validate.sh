@@ -141,6 +141,10 @@ quick_tests() {
   (cd "$ROOT/External/tether-shim-v2" && node --test test/*.test.js)
   echo "== node --test: External/tether-bun-compat =="
   (cd "$ROOT/External/tether-bun-compat" && node --test test/*.test.js)
+  echo "== node --test: TermXNode persistent bootstrap =="
+  node --test "$ROOT"/Packages/TermXNode/Tests/RuntimeJS/*.test.js
+  echo "== node --test: TermXClaude launcher runtime =="
+  node --test "$ROOT"/Packages/TermXClaude/Tests/RuntimeJS/*.test.js
 
   echo "== CMake/CTest: TetherWasm =="
   cmake -S "$ROOT/External/TetherWasm" -B "$BUILD_ROOT/wasm" -DTETHER_WASM_BUILD_TESTS=ON
@@ -180,6 +184,10 @@ quick_tests() {
 
 linux_network_tests() {
   echo "== real Blink/Alpine acceptance =="
+  if [[ -f "$ROOT/Frameworks/.build/host/blink.a" ]]; then
+    export TETHER_LINK_BLINK=1
+    echo "note: linking embedded Blink from Frameworks/.build/host/blink.a"
+  fi
   (
     cd "$ROOT/Packages/TermXLinux"
     TETHER_LINUX_NETWORK_TESTS=1 \

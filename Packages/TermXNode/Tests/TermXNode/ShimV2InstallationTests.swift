@@ -92,25 +92,25 @@ final class ShimV2InstallationTests: XCTestCase {
         )
     }
 
-    /// v1's newline-JSON client must never be pointed at a v2 framed server:
-    /// the ensure-ipc import self-gates on the lane flag.
-    func testEnsureIpcIsGatedToTheV1Lane() throws {
-        let ensureIpc = Self.repoRoot.appendingPathComponent(
-            "Packages/TermXNode/Sources/TermXNode/Resources/shim/ensure-ipc.mjs")
-        let text = try String(contentsOf: ensureIpc, encoding: .utf8)
-        XCTAssertTrue(
-            text.contains("TETHER_IPC_V2"),
-            "ensure-ipc.mjs must skip the v1 connect on the v2 lane"
-        )
-    }
-
-    func testIPCVersionSelectionDrivesThePreloadPath() {
-        // Guards the pairing that keeps Swift and bootstrap.js on one lane.
+    func testV1LaneIsGoneAndV2IsTheOnlyPreload() {
+        XCTAssertTrue(NodeShim.useIPCv2)
         let path = NodeShim.preloadPath ?? ""
-        if NodeShim.useIPCv2 {
-            XCTAssertTrue(path.hasSuffix("index.v2.js"))
-        } else {
-            XCTAssertTrue(path.hasSuffix("index.js"))
-        }
+        XCTAssertTrue(path.hasSuffix("index.v2.js"))
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: Self.repoRoot.appendingPathComponent(
+                    "Packages/TermXNode/Sources/TermXNode/Resources/shim/index.js"
+                ).path
+            ),
+            "v1 preload must not ship"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: Self.repoRoot.appendingPathComponent(
+                    "Packages/TermXNode/Sources/TermXNode/Resources/shim/ensure-ipc.mjs"
+                ).path
+            ),
+            "v1 ensure-ipc must not ship; v1 cannot carry live stdin"
+        )
     }
 }

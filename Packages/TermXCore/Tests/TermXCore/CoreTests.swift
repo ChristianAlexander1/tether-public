@@ -1,6 +1,8 @@
 import XCTest
 @testable import TermXCore
 import TermXShellLang
+import TermXCommands
+import TetherCommands
 
 final class CoreTests: XCTestCase {
 
@@ -440,6 +442,22 @@ final class CoreTests: XCTestCase {
     }
 
     // MARK: - T6 External Commands (TermXCommands integration)
+
+    func testHostCommandRegistriesAreComplementaryNotDuplicates() {
+        let termX = Set(TermXCommandRegistry.all.map { $0.name })
+        let tether = Set(TetherCommandRegistry.all.keys)
+        // Overlap is TermXCommands winning on a shared name, not two copies of
+        // the same library. TetherShellLang is test-only and not in this set.
+        let expectedOverlap: Set<String> = [
+            "stat", "readlink", "mktemp", "paste", "printenv", "id",
+            "split", "join", "expr", "file", "timeout",
+        ]
+        XCTAssertEqual(termX.intersection(tether), expectedOverlap)
+        XCTAssertFalse(termX.isSubset(of: tether))
+        XCTAssertFalse(tether.isSubset(of: termX))
+        XCTAssertGreaterThanOrEqual(termX.count, 20)
+        XCTAssertGreaterThanOrEqual(tether.count, 40)
+    }
 
     func testSedDirectRegistryEntry() throws {
         let tempDir = NSTemporaryDirectory() + "termx_sed_direct_" + UUID().uuidString

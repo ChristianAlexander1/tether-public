@@ -17,50 +17,43 @@ final class HostNodeRuntime: NodeRuntime {
         guard let shimPreload = NodeShim.preloadPath else { return 127 }
 
         var env = job.env
-        var ipcV2Server: NodeJobIPCServer?
-        var legacyServer: NodeSocketServer?
+        let stdio = NodeJobStdio(
+            stdinFD: job.stdinFD,
+            stdoutFD: job.stdoutFD,
+            stderrFD: job.stderrFD,
+            stdinBound: job.interactive && job.stdinFD >= 0 && isatty(job.stdinFD) != 0
+        )
+        let server: NodeJobIPCServer
+        do {
+            server = try NodeJobIPCServer(executor: spawnExecutor)
+        } catch {
+            Self.writeAll(Data("node: IPC startup failed: \(error.localizedDescription)\n".utf8),
+                          to: job.stderrFD)
+            return 1
+        }
+        server.start(stdio: stdio, cwd: job.cwd, env: job.env)
+        env["TETHER_IPC_SOCK"] = server.path
+        env["TERMX_IPC_SOCKET"] = server.path
+        env.removeValue(forKey: "TETHER_INTERACTIVE")
+        env.removeValue(forKey: "TERMX_INTERACTIVE")
 
-        if NodeShim.useIPCv2 {
-            // Same lane split as NodeMobileRuntime: the v2 shim preload speaks
-            // TJIP/2 frames, so it must be paired with the TJIP/2 server — the
-            // v1 newline-JSON server would fail its handshake byte-for-byte.
-            let stdio = NodeJobStdio(
-                stdinFD: job.stdinFD,
-                stdoutFD: job.stdoutFD,
-                stderrFD: job.stderrFD,
-                stdinBound: job.interactive && job.stdinFD >= 0 && isatty(job.stdinFD) != 0
-            )
-            guard let server = NodeJobIPCServer(executor: spawnExecutor) else { return 1 }
-            server.start(stdio: stdio, cwd: job.cwd, env: job.env)
-            ipcV2Server = server
-            env["TETHER_IPC_SOCK"] = server.path
-            env["TERMX_IPC_SOCKET"] = server.path
-            env.removeValue(forKey: "TETHER_INTERACTIVE")
-            env.removeValue(forKey: "TERMX_INTERACTIVE")
-        } else {
-            let bridge = NodeSpawnBridge(executor: spawnExecutor)
-            guard let server = NodeSocketServer(directory: job.cwd) else { return 1 }
-            server.start(
-                bridge: bridge,
-                stdinFD: job.stdinFD, stdoutFD: job.stdoutFD, stderrFD: job.stderrFD,
-                cwd: job.cwd, env: job.env, interactive: job.interactive
-            )
-            legacyServer = server
-            env["TETHER_IPC_SOCK"] = server.path
-            env["TERMX_IPC_SOCKET"] = server.path
-            env["TETHER_INTERACTIVE"] = job.interactive ? "1" : "0"
-            env["TERMX_INTERACTIVE"] = job.interactive ? "1" : "0"
+        var pump: NodeStdinPump?
+        if stdio.stdinBound, job.stdinFD >= 0 {
+            pump = NodeStdinPump(fd: job.stdinFD) { data in
+                server.pushStdin(data)
+            }
+            pump?.start()
         }
 
         lock.lock()
-        activeIPCServer = ipcV2Server
+        activeIPCServer = server
         lock.unlock()
         defer {
+            pump?.stop()
             lock.lock()
             activeIPCServer = nil
             lock.unlock()
-            ipcV2Server?.stop()
-            legacyServer?.stop()
+            server.stop()
         }
 
         let process = Process()
@@ -68,14 +61,9 @@ final class HostNodeRuntime: NodeRuntime {
         process.currentDirectoryURL = URL(fileURLWithPath: job.cwd)
 
         var nodeOptionsParts: [String] = []
-        // ensure-ipc belongs to the v1 lane (its module also self-gates on
-        // TETHER_IPC_V2, so the guest engine stays correct either way).
-        if !NodeShim.useIPCv2, let ensureIpc = NodeShim.ensureIpcPath {
-            nodeOptionsParts.append("--import \(ensureIpc)")
-        }
         nodeOptionsParts.append("--require \(shimPreload)")
         env["NODE_OPTIONS"] = nodeOptionsParts.joined(separator: " ")
-        env["TETHER_IPC_V2"] = NodeShim.useIPCv2 ? "1" : "0"
+        env["TETHER_IPC_V2"] = "1"
         process.environment = env
 
         if let cmd = job.argv.first {
@@ -98,7 +86,10 @@ final class HostNodeRuntime: NodeRuntime {
         let errPipe = Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe
-        if job.stdinFD >= 0 {
+        // TTY stdin is the live IPC channel, not an OS pipe: nodejs-mobile
+        // cannot poll a borrowed PTY, and the v2 shim installs its own Readable.
+        // Piped (non-TTY) stdin still has a real EOF, so it is forwarded here.
+        if job.stdinFD >= 0, isatty(job.stdinFD) == 0 {
             let inPipe = Pipe()
             process.standardInput = inPipe
             DispatchQueue.global().async {
@@ -110,6 +101,8 @@ final class HostNodeRuntime: NodeRuntime {
                 }
                 try? inPipe.fileHandleForWriting.close()
             }
+        } else {
+            process.standardInput = FileHandle.nullDevice
         }
 
         lock.lock()
@@ -163,6 +156,10 @@ final class HostNodeRuntime: NodeRuntime {
             exitCode = Int32(process.terminationStatus)
             drainGroup.wait()
         } catch {
+            let message = Data("node: failed to launch: \(error.localizedDescription)\n".utf8)
+            if job.stderrFD >= 0 {
+                Self.writeAll(message, to: job.stderrFD)
+            }
             exitCode = 1
         }
 
@@ -196,13 +193,22 @@ final class HostNodeRuntime: NodeRuntime {
     func signalActiveJob(_ name: String) {
         lock.lock()
         let server = activeIPCServer
-        let process = currentProcess
         lock.unlock()
-        if let server {
-            server.pushSignal(name)
-        } else if name == "SIGINT" {
-            process?.interrupt()
-        }
+        server?.pushSignal(name)
+    }
+
+    func pushStdin(_ data: Data) {
+        lock.lock()
+        let server = activeIPCServer
+        lock.unlock()
+        server?.pushStdin(data)
+    }
+
+    var foregroundIsRaw: Bool {
+        lock.lock()
+        let server = activeIPCServer
+        lock.unlock()
+        return server?.foregroundIsRaw ?? false
     }
 
     private static func which(_ name: String) -> String? {

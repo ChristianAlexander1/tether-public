@@ -30,6 +30,31 @@ code; downloaded ELF files are never loaded as native iOS code. The selected
 workspace is mounted at `/work`, and host-path mapping rejects prefix confusion,
 `..` traversal, and symlink escape.
 
+## Session ownership and startup
+
+`WorkspaceView` creates exactly one `SessionCommandRunner` for an open
+workspace. The runner is the only owner of the startup and teardown sequence:
+
+```text
+workspaceOpened
+  -> acquire rootfs lease + bootstrap Linux once
+  -> create and start TerminalSession once
+  -> attach the renderer and replay validated saved scrollback
+  -> active
+```
+
+The view must never start `TerminalSession` directly or manufacture
+`bootstrapSucceeded` / `shellStarted` events. Completion events come only from
+the operation that actually completed. This prevents concurrent rootfs mounts
+and duplicate Blink initialization, which are unsafe because the embedded
+runtime is process-global.
+
+The lifecycle services retain the live terminal session until ordered teardown
+finishes. A rootfs lease is acquired before bootstrap begins and released only
+after the output reader has stopped and the PTY has closed. Bootstrap and shell
+failures release the same lease and workspace scope, so retry loops do not leak
+resources.
+
 ## Execution policy
 
 `Packages/TermXLinux/.../tether_dispatch_manifest.json` is the single dispatch
@@ -55,6 +80,23 @@ Node’s `os` module forwards the real embedded runtime. Only `HOME`, `TMPDIR`,
 TTY state, standard opener commands, and process creation are adapted because
 those are properties of the Tether session and its process model.
 
+Claude's official standalone executable is extracted into a split ESM graph.
+`TermXClaude` owns the compatibility boundary between Bun's embedded-file
+loaders and Node: Markdown and text imports return UTF-8 strings, opaque
+`.asset` imports return their extracted paths, and unsupported native add-ons
+use the documented embedded-runtime fallback. The Node engine persists across
+shell commands, while its job shim restores `Module._load` after each command;
+the Claude launcher therefore records the actual wrapper function and
+reinstalls it whenever that function is no longer active. A two-invocation JS
+regression exercises both the asset semantics and this teardown/relaunch path.
+Because Node built-in ESM imports bypass `Module._load`, the TJIP/2 loader also
+publishes its native-loader link. The launcher uses that link with
+`syncBuiltinESMExports()` so Claude's ESM command runner receives the same
+`child_process`, `tty`, and `os` implementations as CommonJS. TJIP children
+implement chainable `ref()`/`unref()` no-ops: their shared session transport is
+already unreferenced, while standard opener/execution libraries still require
+the Node `ChildProcess` method contract.
+
 ## The terminal contract with host-run jobs
 
 A job run on the host lane does not sit under the guest's controlling terminal,
@@ -76,6 +118,9 @@ program turns on (alternate screen, hidden cursor, mouse reporting, bracketed
 paste). When a job exits without clearing them, the engine synthesizes the exact
 reset sequence the program owed and feeds it back through the session's output
 path, so the repair is both rendered and recorded in the scrollback snapshot.
+Saved scrollback replay is a separate startup operation: it is buffered until a
+renderer attaches and is deliberately not recorded again, avoiding duplicated
+snapshots on every reopen.
 
 ## Component placement
 

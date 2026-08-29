@@ -95,8 +95,10 @@ Additional unit tests (parser, lexer, builtins, VirtualProcess, file ops): 19 te
 ## External package integration (T6 / T7 — 2026-08-22)
 
 Dependencies (via `Package.swift`):
-- `../../External/TermXCommands` → `ExternalCommands.swift`
-- `../../External/TermXShellLang` → `ShellLangBridge.swift`
+- `../../External/TermXCommands` → specialized host-shell tools (`sed`, `awk`, …) in `ExternalCommands.swift`
+- `../../External/TetherCommands` → POSIX utilities TermXCommands does not ship; not a second copy of the same set
+- `../../External/TermXShellLang` → production host-shell evaluator (`ShellLangBridge.swift`)
+- `../../External/TetherShellLang` → test-only conformance oracle (`TetherShellConformanceTests`); not linked into the TermXCore library target
 
 **T6:** 30 commands registered from `TermXCommandRegistry.all` (`sed`, `awk`, `diff`, `chmod`, …). `base64` stays on the existing `CoreCommands` implementation.
 

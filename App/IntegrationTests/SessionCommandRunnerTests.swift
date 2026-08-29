@@ -11,6 +11,7 @@ private final class RecordingServices: SessionServices {
         case startBootstrap
         case startShell
         case emitRestoreSequence
+        case restoreSavedScrollback
         case snapshotScrollback
         case stopOutputPump
         case signalShell(String)
@@ -44,6 +45,7 @@ private final class RecordingServices: SessionServices {
     func finishShell() { pendingShell?(shellResult); pendingShell = nil }
 
     func emitRestoreSequence() { steps.append(.emitRestoreSequence) }
+    func restoreSavedScrollback() { steps.append(.restoreSavedScrollback) }
     func snapshotScrollback() { steps.append(.snapshotScrollback) }
     func stopOutputPump() { steps.append(.stopOutputPump) }
     func signalShell(_ name: String) { steps.append(.signalShell(name)) }
@@ -66,7 +68,7 @@ final class SessionCommandRunnerTests: XCTestCase {
 
         runner.send(.workspaceOpened)
 
-        XCTAssertEqual(services.steps, [.startBootstrap, .startShell])
+        XCTAssertEqual(services.steps, [.startBootstrap, .startShell, .restoreSavedScrollback])
         XCTAssertEqual(runner.phase, .active)
     }
 
@@ -80,7 +82,9 @@ final class SessionCommandRunnerTests: XCTestCase {
 
         runner.send(.userRequestedClose)
 
-        let teardown = services.steps.drop { $0 == .startBootstrap || $0 == .startShell }
+        let teardown = services.steps.drop {
+            $0 == .startBootstrap || $0 == .startShell || $0 == .restoreSavedScrollback
+        }
         let stopIndex = try? XCTUnwrap(teardown.firstIndex(of: .stopOutputPump))
         let closeIndex = try? XCTUnwrap(teardown.firstIndex(of: .closePTY))
         let releaseIndex = try? XCTUnwrap(teardown.firstIndex(of: .releaseScope))
@@ -122,6 +126,7 @@ final class SessionCommandRunnerTests: XCTestCase {
         XCTAssertEqual(services.steps, [.startBootstrap, .startShell])
 
         services.finishShell()
+        XCTAssertEqual(services.steps.last, .restoreSavedScrollback)
         XCTAssertEqual(runner.phase, .active)
     }
 

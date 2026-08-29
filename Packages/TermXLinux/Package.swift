@@ -5,12 +5,31 @@ import Foundation
 let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
 let frameworksRoot = packageDir.appendingPathComponent("../../Frameworks").standardizedFileURL
 let blinkSrc = frameworksRoot.appendingPathComponent(".build/blink-src").path
-let blinkLib = frameworksRoot.appendingPathComponent(".build/blink/host/blink.a").path
+// `build-blink.sh` installs the host archive to Frameworks/.build/host/.
+let blinkLib = frameworksRoot.appendingPathComponent(".build/host/blink.a").path
 let blinkXCFrameworkURL = frameworksRoot.appendingPathComponent("Blink.xcframework")
 let blinkInclude = frameworksRoot.appendingPathComponent("include").path
+let hostConfig = frameworksRoot.appendingPathComponent(".build/host/config.h").path
 let linkBlink = (Context.environment["TETHER_LINK_BLINK"]
     ?? Context.environment["TERMX_LINK_BLINK"]) == "1"
 let hasBlinkXCFramework = FileManager.default.fileExists(atPath: blinkXCFrameworkURL.path)
+
+let iosBlinkFlags = [
+    "-fno-modules",
+    "-I", blinkInclude,
+    "-include", "\(blinkInclude)/config.h",
+    "-iquote", blinkSrc,
+    "-D_DARWIN_C_SOURCE",
+    "-DNDEBUG",
+]
+let hostBlinkFlags = [
+    "-fno-modules",
+    "-I", blinkInclude,
+    "-include", hostConfig,
+    "-iquote", blinkSrc,
+    "-D_DARWIN_C_SOURCE",
+    "-DNDEBUG",
+]
 
 var bridgeSettings: [CSetting] = [
     .headerSearchPath("include"),
@@ -23,6 +42,9 @@ var bridgeLinker: [LinkerSetting] = [
 var bridgeDeps: [Target.Dependency] = []
 var packageTargets: [Target] = []
 
+// iOS production links Blink.xcframework (ios-arm64 / simulator). That binary
+// has no macOS slice, so macOS must not inherit TERMX_BLINK_STUB from this
+// branch — otherwise TETHER_LINK_BLINK=1 can never compile the real bridge.
 if hasBlinkXCFramework {
     packageTargets.append(
         .binaryTarget(
@@ -31,35 +53,25 @@ if hasBlinkXCFramework {
         )
     )
     bridgeDeps.append("BlinkBinary")
-    // Real bridge on iOS (linked against Blink.xcframework). macOS package tests keep
-    // the unavailable bridge unless TETHER_LINK_BLINK=1 (host blink.a + HostBlinkRuntime path).
     bridgeSettings += [
-        .define("TERMX_BLINK_STUB", .when(platforms: [.macOS])),
-        .unsafeFlags([
-            "-fno-modules",
-            "-I", blinkInclude,
-            "-include", "\(blinkInclude)/config.h",
-            "-iquote", blinkSrc,
-            "-D_DARWIN_C_SOURCE",
-            "-DNDEBUG",
-        ], .when(platforms: [.iOS])),
+        .unsafeFlags(iosBlinkFlags, .when(platforms: [.iOS])),
     ]
-} else if linkBlink {
+} else {
     bridgeSettings += [
-        .unsafeFlags([
-            "-I", blinkSrc,
-            "-include", "\(blinkSrc)/config.h",
-            "-iquote", blinkSrc,
-            "-D_DARWIN_C_SOURCE",
-            "-DNDEBUG",
-        ], .when(platforms: [.macOS])),
+        .define("TERMX_BLINK_STUB", .when(platforms: [.iOS])),
+    ]
+}
+
+if linkBlink {
+    bridgeSettings += [
+        .unsafeFlags(hostBlinkFlags, .when(platforms: [.macOS])),
     ]
     bridgeLinker += [
         .unsafeFlags([blinkLib], .when(platforms: [.macOS])),
     ]
 } else {
     bridgeSettings += [
-        .define("TERMX_BLINK_STUB"),
+        .define("TERMX_BLINK_STUB", .when(platforms: [.macOS])),
     ]
 }
 

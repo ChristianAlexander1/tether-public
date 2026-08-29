@@ -85,6 +85,7 @@ test('install: second install() is a no-op returning the same promise (edge 13)'
 
 test("install: require('tty') and require('child_process') return the shim (incl. node: prefixes)", async () => {
   await sessionPromise;
+  const Module = require('node:module');
   const tty1 = require('tty');
   const tty2 = require('node:tty');
   const cp1 = require('child_process');
@@ -97,6 +98,16 @@ test("install: require('tty') and require('child_process') return the shim (incl
   assert.equal(typeof cp1.spawnSync, 'function');
   assert.equal(typeof cp1.exec, 'function');
   assert.equal(typeof cp1.execFile, 'function');
+  assert.equal(
+    typeof Module._load._tetherOriginalLoad,
+    'function',
+    'the active loader exposes the native link needed to synchronize ESM built-ins'
+  );
+  assert.notEqual(
+    Module._load._tetherOriginalLoad('node:child_process', module, false),
+    cp1,
+    'the native link does not recurse into the TJIP CommonJS shim'
+  );
   // The shim's isatty answers from the handshake, not the real fd table.
   assert.equal(tty1.isatty(0), true);
   assert.equal(tty1.isatty(7), false);

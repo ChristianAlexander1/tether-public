@@ -1,6 +1,6 @@
 # Tether integration status
 
-Last verified integration pass: **2026-08-25** (rework-plan steps 1–6).
+Last verified integration pass: **2026-08-27** (lifecycle and runtime stabilization).
 
 ## Working product path
 
@@ -46,7 +46,7 @@ which `./scripts/validate.sh --quick` now runs.
 | Step | Component | State |
 |---|---|---|
 | 1 | `TetherVTEngine` | **Default.** Replaced `TerminalProtocolAdapter` in the output path; adapter tests ported as a byte-level oracle and the adapter deleted. Adds crash restore: a program that dies mid-TUI gets its reset sequence synthesized. |
-| 2 | `TetherJobIPC` + `tether-shim-v2` | **Behind `TETHER_IPC_V2=1`.** TJIP/2 server (socket transport, host delegate, async spawn runner). v1 remains the default until the device matrix passes. |
+| 2 | `TetherJobIPC` + `tether-shim-v2` | **Default.** TJIP/2 is the only lane: live stdin (`tty.stdin`), per-fd `isTTY`, real PTY geometry, colour depth 24. v1 (`NodeSocketServer`, `NodeSpawnBridge`, v1 shim) is deleted. |
 | 3 | `TetherJobControl` | **Default.** `JobTable` issues job ids and routes signals; `VirtualChildPID` and the no-op `signal()` are gone from the v2 lane. |
 | 4 | `TetherSessionCore` | **Default.** One state machine per session drives bootstrap, suspend/resume, rootfs removal, and ordered teardown; scrollback snapshots persist across a force-quit. |
 | 5 | `TetherStorageCore` | **Default.** Storage deletes go through `StorageCatalog` with live-session leases; `LinuxPathMapper` delegates confinement to `ConfinedPathResolver`. |
@@ -71,18 +71,41 @@ Captured from the PTY mirror with `TETHER_IPC_V2=1`:
   reporting, then exited non-zero without cleaning up, produced exactly
   `ESC[?1000l ESC[?2004l ESC[?1049l ESC[0m ESC[?25h` and returned a clean prompt.
 
-One defect was found during this pass and is **not** fixed: guest shell
-pipelines segfault the forked child on exit. It reproduces identically on both
-IPC lanes, so it predates this work; see
-[docs/ENGINEERING-TARGETS.md](docs/ENGINEERING-TARGETS.md).
+One defect was found during this pass and is **fixed**: guest shell pipelines
+segfaulted the forked child on exit because the embedded `exit()` interposition
+longjmp'd from the child into the parent's jmp_buf. Fork children now `_exit`,
+and exec in a fork child copies `isfork` onto the new machine.
 
 ## Verified evidence from this pass
 
 - Simulator arm64 build, install and launch succeeded on iPhone 17 Pro.
+- Startup now has one lifecycle owner. The app no longer starts a shell and
+  then separately asks the state machine to bootstrap and start another one;
+  only real operation completions produce lifecycle success events.
+- Rootfs leases now cover bootstrap as well as the live shell, and bootstrap
+  failures release both the lease and workspace scope before a retry.
+- Node's persistent bootstrap no longer calls a removed debug logger at job
+  completion. A simulator smoke run completed a Linux pipeline, printed `42`
+  from Node, executed the following shell command, and returned to the prompt.
+- Claude's extracted Bun graph no longer sends Markdown/text prompt assets to
+  Node's JavaScript compiler. Its loader hook is also reinstalled after each
+  persistent Node job restores `Module._load`, preventing one failed launch
+  from poisoning later commands. The regression runs two launcher jobs in one
+  process; the installed simulator app printed Claude `2.1.247` twice, ran the
+  following marker, and returned to a usable prompt.
+- Claude authentication now uses the supported `claude auth login` command.
+  TJIP/2 publishes its native-loader link so the launcher can synchronize the
+  active `child_process` shim into ESM built-ins, and its `ChildProcess`
+  implements the standard chainable `ref()`/`unref()` contract. A rebuilt-app
+  smoke test reached Claude's real authorization page in Tether's in-app Safari
+  view; no credentials were entered and account-backed completion remains a
+  physical-device release gate.
+- Saved scrollback replay is distinct from live TUI mode repair, buffers until
+  the renderer attaches, and is not duplicated into the next snapshot.
 - Simulator command proofs: real `uname`, redirected Node output `42`, WASI
   output `hello`, and generic `xdg-open https://example.com` without killing the shell.
 - Real Blink/Alpine acceptance installed Python, figlet, GCC, make and Git.
-- TetherFakefs: 6/6 CTest cases pass on macOS, including corruption detection.
+- TetherFakefs: 7/7 CTest cases pass on macOS, including overlay copy-up, whiteout, readdir, rename, and corruption detection.
 - TetherNativeOffload: strict C11/Werror tests pass.
 - Node OS APIs now report native data; fabricated platform/CPU/memory/user data
   and the forced `process.platform` override were removed.

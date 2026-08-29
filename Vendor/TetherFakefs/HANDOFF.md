@@ -130,6 +130,7 @@ relative + absolute symlinks, a symlink cycle, char/block device nodes, and
 | T2 | Read known file bytes == source     | `t2_read`                         |
 | T3 | Symlink resolution, correct target  | `t3_symlink`                      |
 | T4 | Verify 1000 paths, all match        | `t4_verify` + `t4_cli_verify`     |
+| T5 | Overlay copy-up, whiteout, readdir, rename | `t5_overlay`                 |
 
 ### `ctest` output (this checkout)
 
@@ -176,9 +177,10 @@ tether_fakefs *fs = tether_fakefs_open(store_dir, err, sizeof err);
 /* readlink(path)    */ tether_fakefs_readlink(fs, path, buf, len);
 /* realpath(path)    */ tether_fakefs_resolve(fs, path, out, len);
 /* pread(path)       */ tether_fakefs_read(fs, path, buf, len, offset);
-/* open(path,O_RDONLY): get a REAL host fd onto the backing data file — 
+/* open(path,O_RDONLY): get a REAL host fd onto the backing data file —
    mmap it, dup it, hand it to a spawned process, zero-copy:           */
                         int fd = tether_fakefs_open_fd(fs, path);
+/* overlay open         */ tether_fakefs_overlay_open_fd(rw, path, flags);
 /* readdir(dir)      */ tether_fakefs_readdir(fs, dir, cb, user);
 /* fsck              */ tether_fakefs_verify(fs, report_cb, user);
 
@@ -195,8 +197,11 @@ Notes for the integrator:
 * Symlink resolution is fully contained inside the store: absolute targets
   restart at the fakefs root, `..` cannot escape it, cycles return `-ELOOP`
   after 40 hops. The host filesystem is never consulted for path logic.
-* The reader never writes; store mutation (apk installs etc.) is a later
-  track — the format's `reserved` field and `version` header leave room.
+* The reader never writes the lower store. Mutations go through
+  `tether_fakefs_overlay_*` (copy-up into an upper directory, overlayfs
+  `.wh.*` whiteouts, merged `readdir`, `rename`). Production `apk` still
+  uses the extracted writable rootfs; the overlay is the fakefs write path
+  and is what Blink VFS mounts when a fakefs lower store is in use.
 * Creation (`tether_fakefs_create`) is the only part that needs libarchive.
   If Blink only ever *opens* stores shipped from elsewhere, link just
   `tether_fakefs.c`, `tether_path.c`, `tether_crc32.c` — libc-only.
@@ -207,6 +212,7 @@ Notes for the integrator:
 TetherFakefs/
 ├── include/tether_fakefs.h        public API (creation + reader)
 ├── src/tether_fakefs.c            reader: open/stat/resolve/read/readdir/verify
+├── src/tether_fakefs_overlay.c    copy-up writes, mkdir, unlink, readdir, rename
 ├── src/tether_fakefs_create.c     packer: tar.gz → store (libarchive)
 ├── src/tether_path.c              lexical path normalization
 ├── src/tether_crc32.c             CRC-32 (IEEE)

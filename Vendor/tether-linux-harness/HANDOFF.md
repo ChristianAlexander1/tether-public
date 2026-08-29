@@ -5,7 +5,7 @@ userland behavior (pipelines, fork/exec, file I/O, and signals) under Blink.
 
 ## TL;DR
 
-- **42 fixtures**, all passing: **39 PASS offline** (3 network skipped),
+- **43 fixtures**, all passing: **40 PASS offline** (3 network skipped),
   **42 PASS with `NETWORK=1`**.
 - Signals — the critical part of the spec — are proven end to end: SIGINT,
   SIGTERM, SIGHUP, SIGQUIT, and SIGKILL are delivered from the host to the

@@ -6,19 +6,9 @@
  * Job boundaries are enforced by lib/job_lifecycle.js — each command gets clean stdin
  * and mandatory teardown so npm leftovers cannot leak into the next job.
  */
-// Which IPC lane this engine was launched on. The Swift side selects the
-// preload (`index.js` vs `index.v2.js`) and exports the same choice here, so
-// bootstrap never re-applies the v1 module shims over v2's.
-const TETHER_IPC_V2 = process.env.TETHER_IPC_V2 === '1';
-
-if (TETHER_IPC_V2) {
-  // Loads the iOS embedding fixes, the `os` shim, and tether-shim-v2 itself.
-  // The v2 session is opened per job further down, not here: this engine is
-  // persistent and each job gets a different socket.
-  require('./index.v2.js');
-} else {
-  require('./index.js');
-}
+// Which IPC lane this engine was launched on. TJIP/2 is the only lane:
+// v1 structurally cannot carry a live stdin stream.
+require('./index.v2.js');
 
 (function reassertProcessTitle() {
   let title = 'node';
@@ -35,7 +25,6 @@ if (TETHER_IPC_V2) {
 })();
 
 const fs = require('fs');
-const ipc = require('./lib/ipc');
 const lifecycle = require('./lib/job_lifecycle');
 
 const jobFD = Number(process.env.TETHER_JOB_FD ?? process.env.TERMX_JOB_FD ?? -1);
@@ -93,7 +82,6 @@ function trappedExit(code) {
   // terminal never gets its prompt back. Schedule an unconditional completion
   // so exiting is as final here as it is in a real terminal. If the unwind
   // works normally this is a no-op: finishScript clears itself.
-  trace('trappedExit code=' + status);
   setImmediate(() => finishScript(status));
   try {
     if (typeof process.setUncaughtExceptionCaptureCallback === 'function' &&
@@ -124,7 +112,6 @@ function emitJobExit(code) {
 }
 
 function finishScript(code) {
-  trace('finishScript code=' + code + ' pending=' + !!scriptFinish);
   if (!scriptFinish) return;
   const f = scriptFinish;
   scriptFinish = null;
@@ -166,14 +153,11 @@ async function runJob(job, onDone) {
     // 'exit' handlers may still write teardown output (Ink restores the
     // screen there), so the TJIP/2 session must stay alive through it and be
     // closed before Swift sees the reply and stops the per-job server.
-    trace('reply exitCode=' + (obj && obj.exitCode));
     emitJobExit(obj && obj.exitCode);
-    if (TETHER_IPC_V2) {
-      try { require('./v2/lib/index.js').endSession(); } catch (_) { /* ignore */ }
-    }
+    try { require('./v2/lib/index.js').endSession(); } catch (_) { /* ignore */ }
     try { process.chdir(prevCwd); } catch (_) { /* ignore */ }
     writeReply(obj);
-    try { lifecycle.finishJob(intakeSocket, ipc); } catch (_) { /* ignore */ }
+    try { lifecycle.finishJob(intakeSocket); } catch (_) { /* ignore */ }
     onDone();
   };
 
@@ -205,59 +189,33 @@ async function runJob(job, onDone) {
     if (job.env) {
       for (const [key, value] of Object.entries(job.env)) process.env[key] = value;
     }
-    // On the TJIP/2 lane the handshake is the only source of TTY truth; these
-    // flags exist solely for the legacy shim and must not be reintroduced.
-    if (!TETHER_IPC_V2) {
-      process.env.TETHER_INTERACTIVE = job.interactive ? '1' : '0';
-      process.env.TERMX_INTERACTIVE = job.interactive ? '1' : '0';
-    }
+    // Handshake is the only source of TTY truth.
 
     lifecycle.bindStdinFromJob(job);
     if (job.interactive) {
       lifecycle.enableLiveOutput();
-      // v1 only: seed the size from COLUMNS/LINES because nothing pushed it.
-      // On v2 the shim owns columns/rows from the handshake and updates them
-      // on every tty.resize event, so writing them here would fight it.
-      if (!TETHER_IPC_V2) {
-        const cols = Number.parseInt(process.env.COLUMNS || '', 10);
-        const rows = Number.parseInt(process.env.LINES || '', 10);
-        try {
-          if (Number.isFinite(cols) && cols > 0) process.stdout.columns = cols;
-          if (Number.isFinite(rows) && rows > 0) process.stdout.rows = rows;
-        } catch (_) { /* ignore */ }
-      }
     }
 
-    // TJIP/2 lane: this engine is persistent and the Swift side opens a fresh
-    // server socket per job, so the preload's one-shot auto-install can never
-    // cover this job — TETHER_IPC_SOCK did not exist at engine launch and
-    // changes every job. Open a session here, close it in reply(). On the
-    // one-process-per-job host lane the preload already connected (the socket
-    // was in the environment at spawn); await that instead of reconnecting.
-    if (TETHER_IPC_V2) {
-      const sock = process.env.TETHER_IPC_SOCK || process.env.TERMX_IPC_SOCKET;
-      if (sock) {
-        process.env.TETHER_IPC_SOCK = sock;
-        const shimV2 = require('./v2/lib/index.js');
-        const pending = shimV2.ready();
-        if (pending) {
-          await pending;
-        } else {
-          await shimV2.beginSession({
-            // The engine must survive a lost job connection: fail this job,
-            // never process.exit the shared engine (the default handler's
-            // exit is only right when the process is the job).
-            onFatal: (reason) => {
-              try {
-                process.stderr.write(`tether-shim: IPC connection lost (${reason})\n`);
-              } catch (_) { /* ignore */ }
-              finishScript(1);
-            },
-          });
-        }
+    // Persistent engine: Swift opens a fresh server socket per job, so the
+    // preload's one-shot auto-install cannot cover this job. Open a session
+    // here, close it in reply().
+    const sock = process.env.TETHER_IPC_SOCK || process.env.TERMX_IPC_SOCKET;
+    if (sock) {
+      process.env.TETHER_IPC_SOCK = sock;
+      const shimV2 = require('./v2/lib/index.js');
+      const pending = shimV2.ready();
+      if (pending) {
+        await pending;
+      } else {
+        await shimV2.beginSession({
+          onFatal: (reason) => {
+            try {
+              process.stderr.write(`tether-shim: IPC connection lost (${reason})\n`);
+            } catch (_) { /* ignore */ }
+            finishScript(1);
+          },
+        });
       }
-    } else if (process.env.TETHER_IPC_SOCK || process.env.TERMX_IPC_SOCKET) {
-      await ipc.connect();
     }
 
     if (job.kind === 'version') {

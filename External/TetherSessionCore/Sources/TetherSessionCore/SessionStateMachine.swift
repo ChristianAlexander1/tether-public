@@ -79,6 +79,7 @@ public enum SessionCommand: Equatable, Sendable {
     case startBootstrap
     case startShell
     case emitRestoreSequence
+    case restoreSavedScrollback
     case snapshotScrollback
     case stopOutputPump
     case signalShell(String)
@@ -98,9 +99,10 @@ public enum SessionCommand: Equatable, Sendable {
 /// the integrator (they correspond to the statements in the specification):
 ///
 ///  * **`snapshotScrollback` before `emitRestoreSequence`** — the snapshot
-///    captures the live TUI screen (scrollback + cursor), and the restore
-///    sequence is what re-renders it from that snapshot into a clean screen.
-///    Snapshot first, restore second.
+///    captures the live TUI bytes and the terminal-mode repair they require;
+///    the restore command then repairs the current live renderer. Snapshot
+///    first, repair second. Saved snapshot replay is a separate startup
+///    command (`restoreSavedScrollback`).
 ///
 ///  * **`signalShell` → `waitForEngineExit` → `stopOutputPump` →
 ///    `closePTYAfterReaderStops`** — we politely signal the guest (drain
@@ -223,7 +225,11 @@ public final class SessionStateMachine {
                 return transition(.startingShell, [.startShell], event)
             case .bootstrapFailed(let msg):
                 let failure = SessionFailure.bootstrapFailed(msg)
-                return transition(.failed(failure), [.showFailure(failure)], event)
+                return transition(
+                    .failed(failure),
+                    [.showFailure(failure), .releaseWorkspaceScope],
+                    event
+                )
             case .userRequestedClose:
                 return transition(.tearingDown, [.releaseWorkspaceScope], event)
             case .workspaceBecameUnavailable:
@@ -240,7 +246,7 @@ public final class SessionStateMachine {
         case .startingShell:
             switch event {
             case .shellStarted:
-                return transition(.active, [], event)
+                return transition(.active, [.restoreSavedScrollback], event)
             case .ptyFailed(let msg):
                 let failure = SessionFailure.ptyError(msg)
                 return transition(

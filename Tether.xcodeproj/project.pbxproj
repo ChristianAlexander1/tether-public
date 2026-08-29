@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		08AC939BDE1BFF68175373E1 /* TetherSessionCore in Frameworks */ = {isa = PBXBuildFile; productRef = 511234A761F8586ACE726F9D /* TetherSessionCore */; };
+		0DA3FD99D1536CCA303167B1 /* wasm3-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5E7FDED2E9526D84AA07F007 /* wasm3-MIT.txt */; };
 		0FA122C2D24D64AA37BEA89F /* nodejs-mobile-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 45A2818B6F4B9122AABB0CD0 /* nodejs-mobile-MIT.txt */; };
 		187B1AB6C8C6133973A2AA03 /* TermXUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1C218C37C383D86FD28F274B /* TermXUI */; };
 		1EB23F10E69228A7A236A328 /* TetherStorageCore in Frameworks */ = {isa = PBXBuildFile; productRef = B924D98D031D1C6BE4C0B622 /* TetherStorageCore */; };
@@ -18,6 +19,7 @@
 		3AEB67372A90121C6F51056C /* StorageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6D2F3A2DCD10432B1A1E8D /* StorageView.swift */; };
 		4B295AE328F92A1346DF9A3D /* TetherStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7872F58C04D680A79972F41F /* TetherStorage.swift */; };
 		543C0DF4A76F9A9CE3F5B4FA /* ScreensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43246D628E412634714F887A /* ScreensTests.swift */; };
+		58538814B6D0C23EFCF458A4 /* TetherFakefs-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 845BFBDA3B60D99D83079784 /* TetherFakefs-MIT.txt */; };
 		58FB1E1189031ADCC91266EB /* CPython-PSF.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5473D5D5148F294F233904FE /* CPython-PSF.txt */; };
 		62EB64BA20D3479FB472F9EB /* TermXClaude in Frameworks */ = {isa = PBXBuildFile; productRef = 77D8F61BEA5FE488F36F08DD /* TermXClaude */; };
 		65A3B9BDF09B8F1C91496DD1 /* TetherWasmService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 077D77860334CAFF914D5A9D /* TetherWasmService.swift */; };
@@ -61,12 +63,14 @@
 		5473D5D5148F294F233904FE /* CPython-PSF.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "CPython-PSF.txt"; sourceTree = "<group>"; };
 		5B3FA86D6C855C8E76089EB9 /* WorkspaceSessionServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSessionServices.swift; sourceTree = "<group>"; };
 		5DF4D7CC447AD4DFD564CBDA /* FolderPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPickerTests.swift; sourceTree = "<group>"; };
+		5E7FDED2E9526D84AA07F007 /* wasm3-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "wasm3-MIT.txt"; sourceTree = "<group>"; };
 		60D6A68C930567AD8071E028 /* TerminalTypingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTypingTests.swift; sourceTree = "<group>"; };
 		62F41048A949F1756E815092 /* TermXCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXCore; path = Packages/TermXCore; sourceTree = SOURCE_ROOT; };
 		69D1A379300182F229FE80E0 /* TermXFiles */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXFiles; path = Packages/TermXFiles; sourceTree = SOURCE_ROOT; };
 		77EE2413C9A28F64E58F69FE /* TermXNode */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TermXNode; path = Packages/TermXNode; sourceTree = SOURCE_ROOT; };
 		7872F58C04D680A79972F41F /* TetherStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TetherStorage.swift; sourceTree = "<group>"; };
 		7D76387502C620B227F870B8 /* AppContainerFileSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppContainerFileSystem.swift; sourceTree = "<group>"; };
+		845BFBDA3B60D99D83079784 /* TetherFakefs-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "TetherFakefs-MIT.txt"; sourceTree = "<group>"; };
 		8B6D2F3A2DCD10432B1A1E8D /* StorageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageView.swift; sourceTree = "<group>"; };
 		8F03D568A09D680B362F7F58 /* TetherUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TetherUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		941DD19662831CB65C0FFFD7 /* Blink-ISC.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Blink-ISC.txt"; sourceTree = "<group>"; };
@@ -138,6 +142,8 @@
 				45A2818B6F4B9122AABB0CD0 /* nodejs-mobile-MIT.txt */,
 				3A86CE8DDC61D9888B45748D /* Python-Apple-support-MIT.txt */,
 				D039FC37EA04581221A1AE9F /* SwiftTerm-MIT.txt */,
+				845BFBDA3B60D99D83079784 /* TetherFakefs-MIT.txt */,
+				5E7FDED2E9526D84AA07F007 /* wasm3-MIT.txt */,
 			);
 			path = NOTICES;
 			sourceTree = "<group>";
@@ -309,7 +315,9 @@
 				78B918089B86C1072D4114C8 /* JetBrainsMono-OFL.txt in Resources */,
 				AA554DEB604ABC9BDA3F5808 /* Python-Apple-support-MIT.txt in Resources */,
 				27E39B49EBE68AC0F1077C01 /* SwiftTerm-MIT.txt in Resources */,
+				58538814B6D0C23EFCF458A4 /* TetherFakefs-MIT.txt in Resources */,
 				0FA122C2D24D64AA37BEA89F /* nodejs-mobile-MIT.txt in Resources */,
+				0DA3FD99D1536CCA303167B1 /* wasm3-MIT.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

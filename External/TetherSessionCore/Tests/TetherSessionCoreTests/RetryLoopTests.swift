@@ -27,7 +27,7 @@ final class RetryLoopTests: XCTestCase {
             XCTAssertEqual(m.phase, .bootstrapping)
             XCTAssertEqual(m.handle(.bootstrapSucceeded), [.startShell])
             XCTAssertEqual(m.phase, .startingShell)
-            XCTAssertEqual(m.handle(.shellStarted), [])
+            XCTAssertEqual(m.handle(.shellStarted), [.restoreSavedScrollback])
             XCTAssertEqual(m.phase, .active)
 
             // Crash.

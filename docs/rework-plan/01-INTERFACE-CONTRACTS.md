@@ -84,6 +84,7 @@ req "tty.setRawMode" body {"fd":0,"mode":true}    → {ok, "wasRaw":bool}      /
 req "tty.windowSize" body {"fd":1}                → {ok, "cols":int, "rows":int}
 evt S→C "tty.resize" body {"cols":int,"rows":int}                            // client emits process SIGWINCH
 evt S→C "tty.signal" body {"signal":"SIGINT"|"SIGTERM"|"SIGTSTP"|"SIGCONT"|"SIGHUP"}
+evt S→C "tty.stdin"  body {"dataB64":"..."}                                  // live PTY bytes; never EOF on idle
 ```
 
 Semantics:
@@ -276,6 +277,7 @@ public final class JIPServerSession {
     // Server→client pushes (host calls these):
     public func pushResize(cols: Int, rows: Int)
     public func pushSignal(_ name: String)
+    public func pushStdin(_ data: Data)              // live PTY bytes; empty is a no-op (not EOF)
     public func pushStdout(pid: Int32, data: Data)   // enforces flow window, chunks to ≤64 KiB
     public func pushStderr(pid: Int32, data: Data)
     public func pushExit(pid: Int32, code: Int32?, signal: String?)

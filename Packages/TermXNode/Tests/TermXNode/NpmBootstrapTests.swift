@@ -43,14 +43,18 @@ final class NodeEnvironmentTests: XCTestCase {
         XCTAssertEqual(env["npm_config_fund"], "false")
         XCTAssertEqual(env["npm_config_audit"], "false")
         XCTAssertEqual(env["npm_config_progress"], "false")
-        XCTAssertEqual(env["TERMX_INTERACTIVE"], "0")
+        XCTAssertNil(env["TERMX_INTERACTIVE"])
+        XCTAssertNil(env["TETHER_INTERACTIVE"])
+        XCTAssertEqual(env["TETHER_IPC_V2"], "1")
         XCTAssertEqual(env["npm_config_fetch_retries"], "2")
         XCTAssertEqual(env["npm_config_maxsockets"], "8")
     }
 
     func testMergeEnablesLiveNpmOutputWhenInteractive() {
         let env = NodeEnvironment.merge(base: [:], cwd: "/work", home: "/data/home", interactive: true)
-        XCTAssertEqual(env["TERMX_INTERACTIVE"], "1")
+        XCTAssertNil(env["TERMX_INTERACTIVE"])
+        XCTAssertNil(env["TETHER_INTERACTIVE"])
+        XCTAssertEqual(env["TETHER_IPC_V2"], "1")
         XCTAssertEqual(env["npm_config_progress"], "false")
         XCTAssertEqual(env["npm_config_loglevel"], "info")
     }

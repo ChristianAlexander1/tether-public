@@ -81,4 +81,35 @@ final class VTPipelineBehaviorTests: XCTestCase {
         XCTAssertTrue(pipeline.trackerState.isClean)
         XCTAssertTrue(pipeline.restoreSequence().isEmpty)
     }
+
+    /// Claude Code (Ink): alt screen + hidden cursor + mouse + bracketed paste.
+    /// A normal quit emits the matching DECRST itself — the host must not
+    /// synthesize a second restore.
+    func testClaudeLikeNormalQuitProducesNoRestore() {
+        let pipeline = makePipeline(isDark: true)
+        _ = pipeline.feed(Data(
+            "\u{1B}[?1049h\u{1B}[?25l\u{1B}[?1000h\u{1B}[?1002h\u{1B}[?2004h".utf8
+        ))
+        XCTAssertFalse(pipeline.trackerState.isClean)
+        _ = pipeline.feed(Data(
+            "\u{1B}[?2004l\u{1B}[?1002l\u{1B}[?1000l\u{1B}[?25h\u{1B}[?1049l".utf8
+        ))
+        XCTAssertTrue(pipeline.trackerState.isClean)
+        XCTAssertTrue(pipeline.restoreSequence().isEmpty)
+    }
+
+    /// Double-Ctrl-C and a mid-TUI force-kill both leave the same unclean
+    /// modes. hostJobFinished asks for this sequence.
+    func testClaudeLikeAbnormalExitRestoresAltScreenCursorAndMouse() {
+        let pipeline = makePipeline(isDark: true)
+        _ = pipeline.feed(Data(
+            "\u{1B}[?1049h\u{1B}[?25l\u{1B}[?1000h\u{1B}[?2004hClaude TUI".utf8
+        ))
+        let restore = String(decoding: pipeline.restoreSequence(), as: UTF8.self)
+        XCTAssertTrue(restore.contains("\u{1B}[?1049l"))
+        XCTAssertTrue(restore.contains("\u{1B}[?25h"))
+        XCTAssertTrue(restore.contains("\u{1B}[?1000l"))
+        XCTAssertTrue(restore.contains("\u{1B}[?2004l"))
+        XCTAssertFalse(restore.isEmpty)
+    }
 }

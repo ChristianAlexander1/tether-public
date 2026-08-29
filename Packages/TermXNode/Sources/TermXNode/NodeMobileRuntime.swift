@@ -32,6 +32,12 @@ final class NodeMobileRuntime: NodeRuntime {
     func signalActiveJob(_ name: String) {
         hostFallback.signalActiveJob(name)
     }
+
+    func pushStdin(_ data: Data) {
+        hostFallback.pushStdin(data)
+    }
+
+    var foregroundIsRaw: Bool { hostFallback.foregroundIsRaw }
     #else
     private let spawnExecutor: SpawnExecuting
     private let engineLock = NSLock()
@@ -40,8 +46,9 @@ final class NodeMobileRuntime: NodeRuntime {
     private var jobReadFD: Int32 = -1
     private var launchArgvStorage: [String] = []
     /// The TJIP/2 server for the job currently running, so the terminal can
-    /// push resize and signal events into it.
+    /// push resize, stdin and signal events into it.
     private var activeIPCServer: NodeJobIPCServer?
+    private var stdinPump: NodeStdinPump?
     private var launchCStrings: [UnsafeMutablePointer<CChar>?] = []
 
     init(spawnExecutor: SpawnExecuting) {
@@ -57,10 +64,9 @@ final class NodeMobileRuntime: NodeRuntime {
             break
         }
 
-        // `withRedirectedIO` binds stdin to fd 0 only when the job is
-        // interactive *and* its stdin descriptor is a real terminal. The
-        // handshake must describe that same wiring, so compute it once here
-        // and share it with both.
+        // `withRedirectedIO` never binds stdin to the PTY slave. The
+        // handshake still reports fd 0 as a TTY when the job stdin is one,
+        // because live input is pumped over TJIP/2 rather than borrowed.
         let stdio = NodeJobStdio(
             stdinFD: job.stdinFD,
             stdoutFD: job.stdoutFD,
@@ -69,38 +75,37 @@ final class NodeMobileRuntime: NodeRuntime {
         )
 
         var env = job.env
-        var ipcV2Server: NodeJobIPCServer?
-        var legacyServer: NodeSocketServer?
+        let server: NodeJobIPCServer
+        do {
+            server = try NodeJobIPCServer(executor: spawnExecutor)
+        } catch {
+            writeStderr(job, "node: IPC startup failed: \(error.localizedDescription)\n")
+            return 1
+        }
+        server.start(stdio: stdio, cwd: job.cwd, env: job.env)
+        activeIPCServer = server
+        env["TETHER_IPC_SOCK"] = server.path
+        env["TERMX_IPC_SOCKET"] = server.path
+        env.removeValue(forKey: "TETHER_INTERACTIVE")
+        env.removeValue(forKey: "TERMX_INTERACTIVE")
 
-        if NodeShim.useIPCv2 {
-            guard let server = NodeJobIPCServer(executor: spawnExecutor) else { return 1 }
-            server.start(stdio: stdio, cwd: job.cwd, env: job.env)
-            ipcV2Server = server
-            activeIPCServer = server
-            env["TETHER_IPC_SOCK"] = server.path
-            env["TERMX_IPC_SOCKET"] = server.path
-            // No TETHER_INTERACTIVE on this lane — see NodeShim.useIPCv2.
-            env.removeValue(forKey: "TETHER_INTERACTIVE")
-            env.removeValue(forKey: "TERMX_INTERACTIVE")
-        } else {
-            let bridge = NodeSpawnBridge(executor: spawnExecutor)
-            guard let server = NodeSocketServer(directory: job.cwd) else { return 1 }
-            server.start(
-                bridge: bridge,
-                stdinFD: job.stdinFD, stdoutFD: job.stdoutFD, stderrFD: job.stderrFD,
-                cwd: job.cwd, env: job.env, interactive: job.interactive
-            )
-            legacyServer = server
-            env["TETHER_IPC_SOCK"] = server.path
-            env["TERMX_IPC_SOCKET"] = server.path
-            env["TETHER_INTERACTIVE"] = job.interactive ? "1" : "0"
-            env["TERMX_INTERACTIVE"] = job.interactive ? "1" : "0"
+        var pump: NodeStdinPump?
+        if stdio.stdinBound, job.stdinFD >= 0 {
+            // Drain the PTY slave on this side. Do not pass the fd to
+            // nodejs-mobile — it fails to poll borrowed fds after npm.
+            let pumpServer = server
+            pump = NodeStdinPump(fd: job.stdinFD) { data in
+                pumpServer.pushStdin(data)
+            }
+            pump?.start()
+            stdinPump = pump
         }
 
         defer {
-            ipcV2Server?.stop()
-            legacyServer?.stop()
-            if activeIPCServer === ipcV2Server { activeIPCServer = nil }
+            pump?.stop()
+            stdinPump = nil
+            server.stop()
+            if activeIPCServer === server { activeIPCServer = nil }
         }
 
         guard let payload = Self.makeBootstrapPayload(from: job, env: env),
@@ -165,6 +170,14 @@ final class NodeMobileRuntime: NodeRuntime {
         activeIPCServer?.pushSignal(name)
     }
 
+    func pushStdin(_ data: Data) {
+        activeIPCServer?.pushStdin(data)
+    }
+
+    var foregroundIsRaw: Bool {
+        activeIPCServer?.foregroundIsRaw ?? false
+    }
+
     func requestCancel() {
         guard jobWriteFD >= 0 else { return }
         let line = Data("{\"kind\":\"cancel\"}\n".utf8)
@@ -204,7 +217,7 @@ final class NodeMobileRuntime: NodeRuntime {
         // The engine is launched once; bootstrap.js reads this to pick the same
         // lane the Swift side did, so the v1 module shims are never layered
         // over v2's.
-        env["TETHER_IPC_V2"] = NodeShim.useIPCv2 ? "1" : "0"
+        env["TETHER_IPC_V2"] = "1"
         env["TETHER_JOB_FD"] = String(jobPipe.read)
         env["TETHER_JOB_REPLY_FD"] = String(replyPipe.write)
         env["TERMX_JOB_FD"] = String(jobPipe.read)

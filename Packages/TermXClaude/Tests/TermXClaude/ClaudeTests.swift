@@ -154,6 +154,29 @@ final class ClaudeTests: XCTestCase {
         XCTAssertEqual(code, 0)
         XCTAssertEqual(service.state, .authenticated)
         XCTAssertEqual(node.calls.last?.first, "node")
+        XCTAssertEqual(Array(node.calls.last?.suffix(2) ?? []), ["auth", "login"])
+    }
+
+    func testPromptNamedLoginDoesNotMarkAuthenticated() async throws {
+        let suite = "TermXClaudeTests.prompt-login.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-prompt-login-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        try seedEmbeddedInstall(home: home)
+
+        let node = TestNode()
+        node.nextExitCode = 0
+        let service = ClaudeCodeService(node: node, defaults: defaults)
+        let code = try await service.run(
+            argv: ["claude", "login"], cwd: "/tmp",
+            env: ["HOME": home], fds: (-1, -1, -1)
+        )
+
+        XCTAssertEqual(code, 0)
+        XCTAssertEqual(service.state, .installed)
+        XCTAssertEqual(node.calls.last?.last, "login")
     }
 
     func testRunRepairsPartiallyDeletedInstallDespiteStoredFlags() async throws {

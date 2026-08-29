@@ -16,10 +16,18 @@ int termx_blink_init(const char *rootfs_prefix);
 int termx_blink_mount(const char *host_path, const char *guest_path);
 
 /// Run a guest ELF program to completion. argv[0] is the guest binary path inside the rootfs.
-/// File descriptors are dup'd onto guest stdio when >= 0.
+/// File descriptors are dup'd onto guest stdio when >= 0, then **restored** before return
+/// so the caller process does not keep the guest pipes as fd 0/1/2.
 /// Returns the guest exit code (0-255) or a negative errno.
 int termx_blink_run(const char *prog, char *const argv[], char *const envp[],
                     int stdin_fd, int stdout_fd, int stderr_fd);
+
+/// Run a guest ELF while a login shell already owns the primary machine.
+/// Saves and restores `g_machine`, the embedder jmp_buf, and host stdio 0/1/2
+/// so a nested spawn (`git`, `/bin/sh -c`, …) cannot replace the login session
+/// or steal its PTY. Must not be used as the login-shell entry point.
+int termx_blink_run_nested(const char *prog, char *const argv[], char *const envp[],
+                           int stdin_fd, int stdout_fd, int stderr_fd);
 
 /// Request cooperative interruption of the running guest (maps to SIGINT delivery).
 void termx_blink_interrupt(void);

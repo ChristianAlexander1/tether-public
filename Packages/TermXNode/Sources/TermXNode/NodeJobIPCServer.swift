@@ -6,6 +6,23 @@ import TermXFiles
 import TetherJobControl
 import TetherJobIPC
 
+enum NodeJobIPCServerError: LocalizedError {
+    case socket(Int32)
+    case bind(path: String, errno: Int32)
+    case listen(Int32)
+
+    var errorDescription: String? {
+        switch self {
+        case .socket(let code):
+            return "could not create IPC socket (errno \(code))"
+        case .bind(let path, let code):
+            return "could not bind IPC socket at \(path) (errno \(code))"
+        case .listen(let code):
+            return "could not listen on IPC socket (errno \(code))"
+        }
+    }
+}
+
 /// TJIP/2 server: accepts shim connections on a Unix socket and drives one
 /// `JIPServerSession` per connection.
 ///
@@ -19,13 +36,15 @@ final class NodeJobIPCServer {
         let session: JIPServerSession
         let runner: NodeJobSpawnRunner
         let queue: DispatchQueue
+        let stdio: NodeJobStdio
 
         init(transport: JIPSocketTransport, session: JIPServerSession,
-             runner: NodeJobSpawnRunner, queue: DispatchQueue) {
+             runner: NodeJobSpawnRunner, queue: DispatchQueue, stdio: NodeJobStdio) {
             self.transport = transport
             self.session = session
             self.runner = runner
             self.queue = queue
+            self.stdio = stdio
         }
     }
 
@@ -40,12 +59,12 @@ final class NodeJobIPCServer {
     private let executor: SpawnExecuting
     private let clock: JobClock
 
-    init?(executor: SpawnExecuting, clock: JobClock = DispatchJobClock()) {
+    init(executor: SpawnExecuting, clock: JobClock = DispatchJobClock()) throws {
         self.executor = executor
         self.clock = clock
         socketPath = "/tmp/tether-jip-\(UUID().uuidString.prefix(8)).sock"
         serverFD = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard serverFD >= 0 else { return nil }
+        guard serverFD >= 0 else { throw NodeJobIPCServerError.socket(errno) }
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
@@ -60,10 +79,18 @@ final class NodeJobIPCServer {
         let bound = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(serverFD, $0, size) }
         }
-        guard bound == 0, listen(serverFD, 8) == 0 else {
+        guard bound == 0 else {
+            let code = errno
             close(serverFD)
             serverFD = -1
-            return nil
+            throw NodeJobIPCServerError.bind(path: socketPath, errno: code)
+        }
+        guard listen(serverFD, 8) == 0 else {
+            let code = errno
+            close(serverFD)
+            serverFD = -1
+            unlink(socketPath)
+            throw NodeJobIPCServerError.listen(code)
         }
     }
 
@@ -108,7 +135,7 @@ final class NodeJobIPCServer {
         let session = JIPServerSession(transport: transport, delegate: host)
         runner.session = session
 
-        let connection = Connection(transport: transport, session: session, runner: runner, queue: queue)
+        let connection = Connection(transport: transport, session: session, runner: runner, queue: queue, stdio: stdio)
         let key = ObjectIdentifier(connection)
 
         session.onProtocolError = { error in
@@ -145,12 +172,44 @@ final class NodeJobIPCServer {
     /// Route a terminal-generated signal (Ctrl-C and friends) to the shim and
     /// to the foreground job of that connection.
     func pushSignal(_ name: String) {
-        forEachConnection { connection in
-            connection.session.pushSignal(name)
-            if let signal = JobSignal(rawValue: name) {
-                connection.runner.signalForeground(signal)
+        lock.lock()
+        let live = Array(connections.values)
+        lock.unlock()
+        for connection in live {
+            connection.queue.async {
+                connection.session.pushSignal(name)
+                if let signal = JobSignal(rawValue: name) {
+                    connection.runner.signalForeground(signal)
+                }
             }
         }
+    }
+
+    /// Forward PTY-slave bytes into the running shim as live stdin. Idle is
+    /// not EOF; empty payloads are dropped by the session.
+    func pushStdin(_ data: Data) {
+        lock.lock()
+        let count = connections.count
+        lock.unlock()
+        forEachConnection { connection in
+            connection.session.pushStdin(data)
+        }
+    }
+
+    /// Raw-mode state of the job's PTY, from live termios. Cooked-mode Ctrl-C
+    /// is turned into SIGINT; raw-mode programs receive 0x03 as a byte.
+    var foregroundIsRaw: Bool {
+        lock.lock()
+        let live = Array(connections.values)
+        lock.unlock()
+        for connection in live {
+            if let fd = connection.stdio.hostFD(forChildFD: 0), fd >= 0 {
+                return PtyTermios.isRawMode(fd: fd)
+            }
+            let geo = connection.stdio.geometrySourceFD
+            if geo >= 0 { return PtyTermios.isRawMode(fd: geo) }
+        }
+        return false
     }
 
     private func forEachConnection(_ body: @escaping (Connection) -> Void) {

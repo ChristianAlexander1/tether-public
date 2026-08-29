@@ -237,6 +237,13 @@ class MockServer extends EventEmitter {
     this.push('tty.signal', { signal: name });
   }
 
+  /** Push live stdin bytes. Empty is a no-op (not EOF). */
+  stdin(buf) {
+    const raw = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf));
+    if (!raw.length) return;
+    this.push('tty.stdin', { dataB64: raw.toString('base64') });
+  }
+
   /** Close every connection (client should treat this as fatal). */
   closeAll() {
     for (const conn of this.connections) {

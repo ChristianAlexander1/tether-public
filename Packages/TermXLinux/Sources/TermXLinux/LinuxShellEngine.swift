@@ -59,15 +59,16 @@ public final class LinuxShellEngine: TerminalEngine {
     }
 
     public func signal(pid: Int32, _ sig: Int32) {
-        if sig == SIGINT || sig == SIGTERM {
+        if sig == SIGINT {
             lock.lock()
             interruptedPIDs.insert(pid)
             lock.unlock()
-            if sig == SIGTERM {
-                linux.terminate()
-            } else {
-                linux.interrupt()
-            }
+            linux.interrupt()
+        } else if sig == SIGTERM || sig == SIGHUP || sig == SIGKILL {
+            lock.lock()
+            interruptedPIDs.insert(pid)
+            lock.unlock()
+            linux.terminate()
         }
     }
 
@@ -84,25 +85,43 @@ public final class LinuxShellEngine: TerminalEngine {
         write("Install packages with apk add; start a project with git clone or git init.\n")
         write("Bootstrapping if needed…\n")
 
+        // Startup used to block here on an unbounded `sem.wait()`. Any stall in
+        // the task below — a slow first extraction, a wedged mount, a step that
+        // never resumes — froze the terminal permanently on the line above with
+        // no error and no way to tell which step was responsible. A session that
+        // cannot start must say so; it must never hang silently.
+        let progress = BootstrapProgress()
         let sem = DispatchSemaphore(value: 0)
-        var bootstrapError: String?
         Task {
             do {
+                progress.enter("checking Linux data")
                 self.linux.invalidateIfRootfsMissing()
                 if self.linux.state != .ready {
+                    progress.enter("installing Alpine")
                     try await self.linux.bootstrap()
                 }
+                progress.enter("mounting /work")
                 try self.mountWorkspace(cwd)
+                progress.enter("guest integration")
                 try self.ensureGuestIntegration()
+                progress.enter("runtime launchers")
                 try self.ensureHostRuntimeLaunchers()
+                progress.finish(nil)
             } catch {
-                bootstrapError = String(describing: error)
+                progress.finish(String(describing: error))
             }
             sem.signal()
         }
-        sem.wait()
-        if let bootstrapError {
-            write("linux: bootstrap failed: \(bootstrapError)\n")
+
+        // Generous: a first-run rootfs extraction on a cold device is slow.
+        // The point is a bounded failure, not a tight deadline.
+        if sem.wait(timeout: .now() + 180) == .timedOut {
+            write("linux: bootstrap timed out during \(progress.step).\n")
+            write("Reopen the folder; if it repeats, reset Linux data from Storage.\n")
+            return 127
+        }
+        if let bootstrapError = progress.error {
+            write("linux: bootstrap failed during \(progress.step): \(bootstrapError)\n")
             return 127
         }
 
@@ -117,11 +136,7 @@ public final class LinuxShellEngine: TerminalEngine {
     }
 
     private func mountWorkspace(_ hostCwd: String) throws {
-#if canImport(TermXBlinkBridge)
-        let fm = FileManager.default
-        try fm.createDirectory(atPath: hostCwd, withIntermediateDirectories: true)
-        _ = termx_blink_mount(hostCwd, "/work")
-#endif
+        try linux.bindWorkRoot(hostCwd)
     }
 
     /// Install shell integration without replacing Linux commands or forging
@@ -278,3 +293,33 @@ public final class LinuxShellEngine: TerminalEngine {
     }
 #endif
 }
+
+/// Which startup step is in flight, readable from the waiting shell thread.
+///
+/// The bootstrap task and the shell thread touch this from different threads,
+/// so every access is locked. Without it a timeout could only report "bootstrap
+/// failed" with no idea which step hung.
+private final class BootstrapProgress {
+    private let lock = NSLock()
+    private var _step = "starting"
+    private var _error: String?
+
+    var step: String {
+        lock.lock(); defer { lock.unlock() }
+        return _step
+    }
+
+    var error: String? {
+        lock.lock(); defer { lock.unlock() }
+        return _error
+    }
+
+    func enter(_ name: String) {
+        lock.lock(); _step = name; lock.unlock()
+    }
+
+    func finish(_ error: String?) {
+        lock.lock(); _error = error; lock.unlock()
+    }
+}
+

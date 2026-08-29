@@ -34,9 +34,12 @@ protocol NodeRuntime: AnyObject {
     func resize(cols: Int, rows: Int)
     /// Deliver a named signal to the running job without tearing anything
     /// down. On the TJIP/2 lane this is a real signal event inside Node
-    /// (Ctrl-C on a TUI → the program decides how to exit); elsewhere it is a
-    /// best-effort equivalent.
+    /// (Ctrl-C on a TUI → the program decides how to exit).
     func signalActiveJob(_ name: String)
+    /// Live stdin bytes from the PTY slave, pushed over TJIP/2.
+    func pushStdin(_ data: Data)
+    /// Whether the foreground job's PTY is in raw mode right now.
+    var foregroundIsRaw: Bool { get }
 }
 
 enum NodeRuntimeFactory {

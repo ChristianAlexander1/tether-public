@@ -48,6 +48,8 @@ static int g_guest_exit;
  * the interposed exit can observe an active run. */
 static _Atomic bool g_embedded_run_active;
 static pthread_t g_embedded_run_thread;
+static pid_t g_embedded_run_pid;
+static pthread_mutex_t g_nested_mu = PTHREAD_MUTEX_INITIALIZER;
 static termx_host_exec_fn g_host_exec;
 static void *g_host_exec_ctx;
 /* Protects bridge-side publication and retirement of Blink's global machine.
@@ -439,7 +441,25 @@ void termx_blink_set_host_exec(termx_host_exec_fn fn, void *ctx) {
 
 static _Noreturn void termx_blink_finish_guest(int status) {
   bool active = atomic_load_explicit(&g_embedded_run_active, memory_order_acquire);
-  bool runner = active && pthread_equal(pthread_self(), g_embedded_run_thread);
+  bool same_proc = (g_embedded_run_pid != 0 && getpid() == g_embedded_run_pid);
+  bool runner = active && same_proc &&
+                pthread_equal(pthread_self(), g_embedded_run_thread);
+  /* Runtime-gated so it needs no rebuild: SIMCTL_CHILD_TETHER_EXIT_TRACE=1
+   * (simulator) or TETHER_EXIT_TRACE=1 turns it on. Silent app termination is
+   * invisible to crash reporters, so this is the only way to see which branch
+   * ran. */
+  if (getenv("TETHER_EXIT_TRACE")) {
+    char trace[192];
+    int n = snprintf(trace, sizeof trace,
+                     "[tether-exit] status=%d active=%d same_proc=%d runner=%d "
+                     "-> %s\n",
+                     status, (int)active, (int)same_proc, (int)runner,
+                     (active && runner)  ? "longjmp(guest)"
+                     : (!same_proc)      ? "_exit(fork child)"
+                     : active            ? "pthread_exit(thread)"
+                                         : "_exit(HOST — KILLS APP)");
+    if (n > 0) { ssize_t w = write(2, trace, (size_t)n); (void)w; }
+  }
   if (active && runner) {
     pthread_mutex_lock(&g_machine_mu);
     /* SysExitGroup has already freed the machine before calling exit. */
@@ -447,6 +467,20 @@ static _Noreturn void termx_blink_finish_guest(int status) {
     pthread_mutex_unlock(&g_machine_mu);
     g_guest_exit = status & 255;
     longjmp(g_exit_jmp, 1);
+  }
+
+  /* Blink fork() is a real POSIX fork. After fork, pthread_equal still
+   * matches the copied embedder thread id, so a longjmp here would jump
+   * into the parent's jmp_buf from the child — the pipeline segfault.
+   * _exit the child process only. */
+  if (!same_proc) {
+    _exit(status);
+  }
+
+  /* Same iOS process, not the embedder thread: a Blink clone-thread or a
+   * fork-child that somehow shares a pid. Never _exit the app. */
+  if (active) {
+    pthread_exit(NULL);
   }
 
   /* A host-side exit outside the active guest retains normal libc behavior. */
@@ -489,10 +523,45 @@ static int DupStdio(int stdin_fd, int stdout_fd, int stderr_fd) {
   return 0;
 }
 
+/* One-shot guest runs dup the caller's pipes onto process 0/1/2. Nested
+ * exec already saved/restored those FDs; the outer termx_blink_run did
+ * not. C6 then closed its write ends and blocked forever in read()
+ * because STDOUT still held the pipe — and apk-to-/dev/null during
+ * bootstrap left XCTest output on /dev/null. */
+static void blink_restore_stdio(int saved[3]) {
+  if (saved[0] >= 0) {
+    (void)dup2(saved[0], STDIN_FILENO);
+    close(saved[0]);
+    saved[0] = -1;
+  }
+  if (saved[1] >= 0) {
+    (void)dup2(saved[1], STDOUT_FILENO);
+    close(saved[1]);
+    saved[1] = -1;
+  }
+  if (saved[2] >= 0) {
+    (void)dup2(saved[2], STDERR_FILENO);
+    close(saved[2]);
+    saved[2] = -1;
+  }
+}
+
+static int blink_save_stdio(int saved[3]) {
+  saved[0] = dup(STDIN_FILENO);
+  saved[1] = dup(STDOUT_FILENO);
+  saved[2] = dup(STDERR_FILENO);
+  if (saved[0] < 0 || saved[1] < 0 || saved[2] < 0) {
+    blink_restore_stdio(saved);
+    return -1;
+  }
+  return 0;
+}
+
 static int TermxExec(char *execfn, char *prog, char **argv, char **envp) {
   int i;
   sigset_t oldmask;
   struct Machine *m, *old;
+  bool fork_child;
 
   if (g_interrupted) return 130;
 
@@ -506,8 +575,15 @@ static int TermxExec(char *execfn, char *prog, char **argv, char **envp) {
   }
 
   pthread_mutex_lock(&g_machine_mu);
-  if ((old = g_machine)) KillOtherThreads(old->system);
+  old = g_machine;
+  fork_child = old && old->system->isfork;
+  /* A pipeline stage is a real fork child. Killing threads / freeing the
+   * machine would UAF the login shell if we were still in the parent;
+   * after fork it is the child's private copy, but KillOtherThreads is
+   * still the wrong tool — RemoveOtherThreads already ran. */
+  if (old && !fork_child) KillOtherThreads(old->system);
   g_machine = m = NewMachine(NewSystem(XED_MACHINE_MODE_LONG), 0);
+  if (fork_child) m->system->isfork = true;
   pthread_mutex_unlock(&g_machine_mu);
   unassert(m);
 
@@ -602,6 +678,47 @@ int termx_blink_mount(const char *host_path, const char *guest_path) {
   return 0;
 }
 
+static int blink_prepare_argv(const char *prog, char *const argv[],
+                              char ***out_argv, int *out_argc, char **out_execfn,
+                              char pathbuf[PATH_MAX]) {
+  int argc = 0;
+  char **mutable_argv;
+  char *execfn;
+  int i;
+
+  while (argv[argc]) argc++;
+  mutable_argv = calloc((size_t)argc + 1, sizeof(char *));
+  if (!mutable_argv) return -ENOMEM;
+  for (i = 0; i < argc; ++i) {
+    mutable_argv[i] = strdup(argv[i]);
+    if (!mutable_argv[i]) {
+      for (int j = 0; j < i; ++j) free(mutable_argv[j]);
+      free(mutable_argv);
+      return -ENOMEM;
+    }
+  }
+  execfn = Commandv(prog, pathbuf, PATH_MAX);
+  if (!execfn) {
+    for (i = 0; i < argc; ++i) free(mutable_argv[i]);
+    free(mutable_argv);
+    return -ENOENT;
+  }
+  mutable_argv[0] = execfn;
+  *out_argv = mutable_argv;
+  *out_argc = argc;
+  *out_execfn = execfn;
+  return 0;
+}
+
+static void blink_free_argv(char **mutable_argv, int argc, char *execfn) {
+  int i;
+  if (!mutable_argv) return;
+  for (i = 0; i < argc; ++i) {
+    if (mutable_argv[i] != execfn) free(mutable_argv[i]);
+  }
+  free(mutable_argv);
+}
+
 int termx_blink_run(const char *prog, char *const argv[], char *const envp[],
                     int stdin_fd, int stdout_fd, int stderr_fd) {
   char pathbuf[PATH_MAX];
@@ -609,36 +726,31 @@ int termx_blink_run(const char *prog, char *const argv[], char *const envp[],
   char **mutable_argv = NULL;
   int argc = 0;
   int rc;
+  int saved_stdio[3] = {-1, -1, -1};
 
   if (!g_initialized) return -EINVAL;
   if (!prog || !argv || !argv[0]) return -EINVAL;
 
   g_interrupted = 0;
 
-  if (DupStdio(stdin_fd, stdout_fd, stderr_fd) != 0) {
+  if (blink_save_stdio(saved_stdio) != 0) {
     return -errno;
   }
-
-  while (argv[argc]) argc++;
-  mutable_argv = calloc((size_t)argc + 1, sizeof(char *));
-  if (!mutable_argv) return -ENOMEM;
-  for (int i = 0; i < argc; ++i) {
-    mutable_argv[i] = strdup(argv[i]);
-    if (!mutable_argv[i]) {
-      rc = -ENOMEM;
-      goto cleanup;
-    }
+  if (DupStdio(stdin_fd, stdout_fd, stderr_fd) != 0) {
+    rc = -errno;
+    blink_restore_stdio(saved_stdio);
+    return rc;
   }
 
-  execfn = Commandv(prog, pathbuf, sizeof(pathbuf));
-  if (!execfn) {
-    rc = -ENOENT;
-    goto cleanup;
+  rc = blink_prepare_argv(prog, argv, &mutable_argv, &argc, &execfn, pathbuf);
+  if (rc != 0) {
+    blink_restore_stdio(saved_stdio);
+    return rc;
   }
 
-  mutable_argv[0] = execfn;
   g_guest_exit = 1;
   g_embedded_run_thread = pthread_self();
+  g_embedded_run_pid = getpid();
   atomic_store_explicit(&g_embedded_run_active, true, memory_order_release);
   /* Keep one checkpoint around the whole run. Guest execve recursively calls
    * TermxExec; putting setjmp there would unwind only the innermost exec and
@@ -649,14 +761,86 @@ int termx_blink_run(const char *prog, char *const argv[], char *const envp[],
     rc = g_guest_exit;
   }
   atomic_store_explicit(&g_embedded_run_active, false, memory_order_release);
+  g_embedded_run_pid = 0;
 
-cleanup:
-  if (mutable_argv) {
-    for (int i = 0; i < argc; ++i) {
-      if (mutable_argv[i] != execfn) free(mutable_argv[i]);
-    }
-    free(mutable_argv);
+  blink_free_argv(mutable_argv, argc, execfn);
+  blink_restore_stdio(saved_stdio);
+  return rc;
+}
+
+int termx_blink_run_nested(const char *prog, char *const argv[], char *const envp[],
+                           int stdin_fd, int stdout_fd, int stderr_fd) {
+  char pathbuf[PATH_MAX];
+  char *execfn = NULL;
+  char **mutable_argv = NULL;
+  int argc = 0;
+  int rc;
+  jmp_buf saved_jmp;
+  pthread_t saved_thread;
+  pid_t saved_pid;
+  struct Machine *saved_machine;
+  int saved_stdio[3] = {-1, -1, -1};
+  bool saved_active;
+
+  if (!g_initialized) return -EINVAL;
+  if (!prog || !argv || !argv[0]) return -EINVAL;
+
+  pthread_mutex_lock(&g_nested_mu);
+
+  if (blink_save_stdio(saved_stdio) != 0) {
+    rc = -errno;
+    goto restore_stdio;
   }
+
+  if (DupStdio(stdin_fd, stdout_fd, stderr_fd) != 0) {
+    rc = -errno;
+    goto restore_stdio;
+  }
+
+  rc = blink_prepare_argv(prog, argv, &mutable_argv, &argc, &execfn, pathbuf);
+  if (rc != 0) goto restore_stdio;
+
+  memcpy(&saved_jmp, &g_exit_jmp, sizeof(jmp_buf));
+  saved_thread = g_embedded_run_thread;
+  saved_pid = g_embedded_run_pid;
+  saved_active = atomic_load_explicit(&g_embedded_run_active, memory_order_acquire);
+
+  pthread_mutex_lock(&g_machine_mu);
+  saved_machine = g_machine;
+  /* Hide the login machine so TermxExec does not KillOtherThreads / FreeMachine
+   * it. Nested exec is a private machine; the login shell stays blocked in
+   * host_exec until we return. */
+  g_machine = NULL;
+  pthread_mutex_unlock(&g_machine_mu);
+
+  g_interrupted = 0;
+  g_guest_exit = 1;
+  g_embedded_run_thread = pthread_self();
+  g_embedded_run_pid = getpid();
+  atomic_store_explicit(&g_embedded_run_active, true, memory_order_release);
+
+  if (setjmp(g_exit_jmp) == 0) {
+    rc = TermxExec(execfn, execfn, mutable_argv, (char **)envp);
+  } else {
+    rc = g_guest_exit;
+  }
+
+  pthread_mutex_lock(&g_machine_mu);
+  g_machine = saved_machine;
+  pthread_mutex_unlock(&g_machine_mu);
+
+  memcpy(&g_exit_jmp, &saved_jmp, sizeof(jmp_buf));
+  g_embedded_run_thread = saved_thread;
+  g_embedded_run_pid = saved_pid;
+  atomic_store_explicit(&g_embedded_run_active, saved_active, memory_order_release);
+
+  blink_free_argv(mutable_argv, argc, execfn);
+  mutable_argv = NULL;
+
+restore_stdio:
+  blink_restore_stdio(saved_stdio);
+  blink_free_argv(mutable_argv, argc, execfn);
+  pthread_mutex_unlock(&g_nested_mu);
   return rc;
 }
 

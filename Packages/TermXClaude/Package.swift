@@ -26,7 +26,8 @@ let package = Package(
         ),
         .testTarget(
             name: "TermXClaudeTests",
-            dependencies: ["TermXClaude"]
+            dependencies: ["TermXClaude"],
+            path: "Tests/TermXClaude"
         ),
     ]
 )

@@ -29,6 +29,7 @@ const ttyShim = require('./tty');
 const cpShim = require('./child_process');
 const signals = require('./signals');
 const stdio = require('./stdio');
+const workpath = require('./workpath');
 
 let installPromise = null;
 let state = null;
@@ -67,11 +68,20 @@ function unref(stream) {
 function patchModuleLoader() {
   if (originalLoad !== null) return; // already patched
   originalLoad = Module._load;
-  Module._load = function patchedLoad(request, parent, isMain) {
+  function patchedLoad(request, parent, isMain) {
     if (request === 'tty' || request === 'node:tty') return ttyShim;
     if (request === 'child_process' || request === 'node:child_process') return cpShim;
     return originalLoad.apply(this, arguments);
-  };
+  }
+  // ESM imports of built-ins bypass Module._load. Split-graph launchers use
+  // this link to copy the active TJIP implementations into Node's ESM export
+  // cells via syncBuiltinESMExports(). Keep it pointed
+  // at the genuinely native loader even when another Tether layer (for `os`)
+  // sits immediately below this one.
+  patchedLoad._tetherOriginalLoad =
+    originalLoad._tetherOriginalLoad || originalLoad;
+  patchedLoad._tetherPatched = true;
+  Module._load = patchedLoad;
 }
 
 function unpatchModuleLoader() {
@@ -105,6 +115,25 @@ function createSession(options = {}) {
   }
 
   const client = new Client(stream, { onFatal: options.onFatal });
+
+  // Patch child_process before the handshake resolves so a `--require`'d
+  // one-process-per-job script can spawnSync on the first tick. spawnSync
+  // uses a dedicated second connection and only needs connectSync; TTY
+  // truth is filled in when the handshake completes.
+  patchModuleLoader();
+  cpShim.attach({
+    client: {
+      on() {},
+      request() {
+        return Promise.reject(new Error('tether-shim: handshake pending'));
+      },
+    },
+    handshake: { ttyFds: [], cols: 0, rows: 0, termName: 'dumb', colorTerm: '' },
+    connectSync,
+    addStream() {},
+    removeStream() {},
+    liveStreams() { return []; },
+  });
 
   const promise = client
     .handshake({ proto: 2, role: 'node-shim', features: ['tty', 'spawn', 'flow'] })
@@ -149,6 +178,7 @@ function createSession(options = {}) {
       signals.attach(state);
       stdio.attach(state);
       cpShim.attach(state);
+      workpath.attach();
       patchModuleLoader();
 
       return { client, handshake };
@@ -200,6 +230,7 @@ function endSession() {
   unpatchModuleLoader();
   if (state) {
     ttyShim.detach();
+    stdio.detach();
     cpShim.detach();
     try {
       state.client.dispose();
