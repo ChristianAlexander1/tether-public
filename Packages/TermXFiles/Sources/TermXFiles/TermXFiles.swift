@@ -480,6 +480,21 @@ public final class WorkspaceStore: NSObject, WorkspaceProviding {
         return url.standardizedFileURL.path
     }
 
+    // MARK: - Internal workspace (fork patch: picker-free workspace)
+
+    /// Registers a workspace backed by an app-owned folder inside the app's
+    /// Documents directory. The folder needs no security-scoped bookmark from
+    /// the system folder picker, so this path works even when the picker's
+    /// confirmation button does not respond on the device.
+    public func registerInternalWorkspace(_ workspace: Workspace, folderURL: URL) throws {
+        try registerLocalWorkspaceForTesting(workspace, rootURL: folderURL, persisted: true)
+    }
+
+    /// Activates access for an internal workspace registered above.
+    public func beginInternalAccess(_ w: Workspace) throws -> String {
+        try beginLocalAccessForTesting(w)
+    }
+
     private func load() {
         guard let data = defaults.data(forKey: key),
               let values = try? JSONDecoder().decode([BookmarkRecord].self, from: data) else { return }
