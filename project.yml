@@ -43,6 +43,7 @@ targets:
       - path: App/Resources
         optional: true
         buildPhase: resources
+      - path: App/Assets.xcassets
     info:
       path: App/Info.plist
       properties:
@@ -70,6 +71,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.tether.app
         CODE_SIGNING_ALLOWED: "NO"
         SWIFT_VERSION: "5.10"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     postCompileScripts:
       - name: Install Python Stdlib
         basedOnDependencyAnalysis: false
