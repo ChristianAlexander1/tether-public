@@ -1,0 +1,81 @@
+name: Build Tether unsigned IPA (for ESign)
+
+# Manual trigger only: go to Actions tab -> this workflow -> Run workflow.
+# Produces an UNSIGNED Tether.ipa. ESign (or any sideload signer) re-signs
+# it with your own certificate on your iPhone before installing.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install build tools
+        run: |
+          brew install xcodegen cmake libarchive pkgconf make
+
+      # --- Required native frameworks (none of them are committed to git) ---
+      - name: Fetch NodeMobile.xcframework (pinned + SHA-256 checked by script)
+        run: ./Frameworks/build-nodejs-mobile.sh
+
+      - name: Fetch TermXPython.xcframework (BeeWare Python-Apple-support)
+        run: ./Packages/TermXPython/Scripts/build-termx-python-xcframework.sh
+
+      - name: Build Blink.xcframework (heaviest step, compiles from source)
+        run: ./Frameworks/build-blink.sh
+
+      - name: Verify frameworks are present
+        run: |
+          test -d Frameworks/Blink.xcframework
+          test -d Frameworks/NodeMobile.xcframework
+          test -d Frameworks/TermXPython.xcframework
+          du -sh Frameworks/*.xcframework
+
+      # --- Build the app for a real device, unsigned ---
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build Tether (iphoneos, no signing)
+        run: |
+          xcodebuild \
+            -project Tether.xcodeproj \
+            -scheme Tether \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$PWD/build/DerivedData" \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          APP="$PWD/build/DerivedData/Build/Products/Release-iphoneos/Tether.app"
+          test -d "$APP"
+          rm -rf Payload Tether-unsigned.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry Tether-unsigned.ipa Payload
+          ls -lh Tether-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tether-unsigned-ipa
+          path: Tether-unsigned.ipa
+          if-no-files-found: error
