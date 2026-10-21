@@ -60,6 +60,24 @@ final class AppModel: ObservableObject {
         catch { errorMessage = error.localizedDescription }
     }
 
+    /// Picker-free fallback: create (or reopen) a workspace folder inside the
+    /// app's own Documents directory and select it. The folder and its files
+    /// persist across launches and stay visible in Files under the app folder.
+    func useInternalWorkspace() {
+        do {
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let folder = docs.appendingPathComponent("InternalWorkspace", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            if let existing = workspaces.restoreAll().first(where: { $0.name == "InternalWorkspace" }) {
+                selected = existing
+                return
+            }
+            let ws = Workspace(name: "InternalWorkspace", mountPath: "/workspaces/InternalWorkspace")
+            try workspaces.registerInternalWorkspace(ws, folderURL: folder)
+            selected = ws
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     func closeWorkspace() {
         selected = nil
     }
@@ -100,6 +118,11 @@ struct RootView: View {
                     Text("Choose a workspace").font(.title2.bold())
                     Text("Choose a folder from Files. Tether keeps Linux and global tools separately in app storage.")
                         .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Button("Use Internal Folder") { model.useInternalWorkspace() }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.top, 4)
+                    Text("No folder picker needed. Files live in the app's InternalWorkspace folder.")
+                        .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
@@ -331,12 +354,11 @@ struct WorkspaceView: View {
         guard model.selected?.id == workspace.id else { return }
         guard session == nil, !openFailed, !startFailed else { return }
         let path: String?
-        #if DEBUG
+        // External (picker) workspaces resolve through their security-scoped
+        // bookmark; the internal workspace has no picker grant, so fall back
+        // to its app-owned folder access when the bookmark path cannot open.
         path = (try? model.workspaces.beginAccess(workspace))
-            ?? (try? model.workspaces.beginLocalAccessForTesting(workspace))
-        #else
-        path = try? model.workspaces.beginAccess(workspace)
-        #endif
+            ?? (try? model.workspaces.beginInternalAccess(workspace))
         guard !Task.isCancelled, model.selected?.id == workspace.id else {
             if path != nil { model.workspaces.endAccess(workspace) }
             return
