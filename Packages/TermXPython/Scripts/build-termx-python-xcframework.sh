@@ -32,7 +32,7 @@ mv "$BUILD_DIR/extract/Python.xcframework" "$OUT_XCF"
 mkdir -p "$PKG_DIR/Vendor"
 ln -sfn "../../../Frameworks/TermXPython.xcframework" "$PKG_DIR/Vendor/TermXPython.xcframework"
 
-HEADER_SRC="$OUT_XCF/macos-arm64_x86_64/Python.framework/Versions/3.14/include/python3.14"
+HEADER_SRC="$OUT_XCF/ios-arm64/include/python3.14"
 HEADER_DST="$PKG_DIR/Sources/TermXPythonBridge/PythonHeaders"
 rm -rf "$HEADER_DST"
 mkdir -p "$HEADER_DST"
