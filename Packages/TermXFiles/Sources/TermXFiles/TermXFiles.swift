@@ -491,8 +491,49 @@ public final class WorkspaceStore: NSObject, WorkspaceProviding {
     }
 
     /// Activates access for an internal workspace registered above.
+    ///
+    /// The folder lives inside the app's own Documents directory, which the
+    /// app can always reach directly, so this deliberately bypasses the
+    /// stored bookmark: a minimal bookmark for an app-container path is not
+    /// reliable on device (the container path changes across reinstalls and
+    /// the bookmark carries no security scope that could be opened). The
+    /// path is recomputed from the current Documents directory on every
+    /// call, and the folder is recreated if it was removed.
     public func beginInternalAccess(_ w: Workspace) throws -> String {
-        try beginLocalAccessForTesting(w)
+        lock.lock()
+        guard var record = records[w.id] else {
+            lock.unlock()
+            throw WorkspaceError.missingBookmark
+        }
+        if let count = activeCounts[w.id], count > 0, let path = realPaths[w.id] {
+            activeCounts[w.id] = count + 1
+            record.lastAccessed = Date()
+            record.accessCount += 1
+            records[w.id] = record
+            lock.unlock()
+            persist()
+            return path
+        }
+        lock.unlock()
+
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let folder = docs.appendingPathComponent(w.name, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            throw WorkspaceError.missingBookmark
+        }
+        let path = folder.standardizedFileURL.path
+        lock.lock()
+        activeCounts[w.id, default: 0] += 1
+        realPaths[w.id] = path
+        record.lastAccessed = Date()
+        record.accessCount += 1
+        records[w.id] = record
+        lock.unlock()
+        persist()
+        return path
     }
 
     private func load() {
