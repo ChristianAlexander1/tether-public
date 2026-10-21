@@ -43,7 +43,6 @@ targets:
       - path: App/Resources
         optional: true
         buildPhase: resources
-      - path: App/Assets.xcassets
     info:
       path: App/Info.plist
       properties:
@@ -55,6 +54,15 @@ targets:
         CFBundleDisplayName: Tether
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles:
+              - AppIcon60x60
+        CFBundleIcons~ipad:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles:
+              - AppIcon60x60
+              - AppIcon76x76
     dependencies:
       - package: TermXUI
       - package: TermXCore
@@ -71,7 +79,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.tether.app
         CODE_SIGNING_ALLOWED: "NO"
         SWIFT_VERSION: "5.10"
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     postCompileScripts:
       - name: Install Python Stdlib
         basedOnDependencyAnalysis: false
